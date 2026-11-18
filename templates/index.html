@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Name saver</title>
+</head>
+<body>
+    <h1>What is your name?</h1>
+
+    <form method="post">
+        <input name="name" maxlength="100" required>
+        <button type="submit">Save my name</button>
+    </form>
+
+    <h2>Saved names</h2>
+
+    <ul>
+        {% for person in names %}
+            <li>{{ person[0] }}</li>
+        {% endfor %}
+    </ul>
+</body>
+</html>
