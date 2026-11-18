@@ -877,34 +877,6 @@ def examination_form(exam_id):
         "duration": "",
         "max_marks": ""
     }
-
-    if (
-        request.method == "POST"
-        and request.form.get("action") == "delete"
-    ):
-        if exam_id is None:
-            abort(400)
-
-        try:
-            database.execute(
-                "DELETE FROM examination WHERE exam_id = ?",
-                (exam_id,)
-            )
-            database.commit()
-
-        except sqlite3.IntegrityError:
-            database.rollback()
-
-        return render_template(
-            "examination_form.html",
-            values=values,
-            error=error,
-            exam_id=exam_id,
-            delete_mode=delete_mode
-        )
-
-        return redirect(url_for("admin_dashboard"))
-
     if (
         request.method == "POST"
         and request.form.get("action") == "cancel"
@@ -1037,11 +1009,42 @@ def examination_form(exam_id):
 
                 return redirect(url_for("dashboard"))
 
+        if (
+            request.method == "POST"
+            and request.form.get("action") == "delete"
+            ):
+            if exam_id is None:
+                abort(400)
+
+            try:
+                database.execute(
+                    "DELETE FROM examination WHERE exam_id = ?",
+                    (exam_id,)
+                )
+                database.commit()
+
+            except sqlite3.IntegrityError:
+                database.rollback()
+
+                return render_template(
+                    "examination_form.html",
+                    values=values,
+                    error=(
+                        "This examination has related records "
+                        "and cannot be deleted."
+                    ),
+                    exam_id=exam_id,
+                    delete_mode=True
+                )
+
+        return redirect(url_for("admin_dashboard"))
+
     return render_template(
         "examination_form.html",
         values=values,
         error=error,
-        exam_id=exam_id
+        exam_id=exam_id,
+        delete_mode=delete_mode
     )
 
 @app.route(
@@ -1052,10 +1055,6 @@ def examination_form(exam_id):
 @app.route(
     "/admin/examinations/<int:exam_id>/slots",
     defaults={"slot_id": None},
-    methods=["GET", "POST"]
-)
-@app.route(
-    "/admin/examinations/<int:exam_id>/slots/<int:slot_id>/edit",
     methods=["GET", "POST"]
 )
 
@@ -1648,16 +1647,11 @@ def save_slot_availability(
 ):
     slots = database.execute(
         """
-        SELECT
-            slot_id,
-            exam_id,
-            slot_date,
-            start_time,
-            end_time,
-            examiner_id
+        SELECT *
         FROM examination_slot
-        ORDER BY exam_id, slot_date, start_time
-        """
+        WHERE exam_id = ?
+        """,
+        (exam_id,)
     ).fetchall()
 
     valid_ids = {slot["slot_id"] for slot in slots}
@@ -1762,8 +1756,10 @@ def examiner_availability():
 
             # Ignore any submitted examiner ID.
             examiner_id_text = str(profile["examiner_id"])
-
-        if exam_id_text or request.method == "POST":
+        if (
+            (exam_id_text and examiner_id_text)
+            or request.method == "POST"
+        ):
             try:
                 exam_id = int(exam_id_text)
                 examiner_id = int(examiner_id_text)
@@ -2143,15 +2139,11 @@ def examiner_dashboard():
 
         examinations = database.execute(
             """
-            SELECT examination.*
-            FROM examination
-            WHERE EXISTS (
-                SELECT 1
-                FROM examination_slot
-                WHERE examination_slot.exam_id = examination.exam_id
-                  AND examination_slot.examiner_id = ?
-            )
-            ORDER BY examination.exam_id
+            SELECT e.*
+            FROM examination e
+            JOIN examiner_assignment a ON a.exam_id = e.exam_id
+            WHERE a.examiner_id = ?
+            ORDER BY e.exam_id
             """,
             (examiner_id,)
         ).fetchall()

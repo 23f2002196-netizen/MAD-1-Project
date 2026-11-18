@@ -172,6 +172,13 @@
                                     'admin_rubrics',
                                     exam_id=exam['exam_id']
                                 ) }}">Rubrics</a>
+                                
+                                <a href="{{ url_for(
+                                    'assign_examiner',
+                                    exam_id=exam['exam_id']
+                                ) }}">
+                                    Assign examiner
+                                </a>
                             </td>
                         </tr>
                     {% else %}
