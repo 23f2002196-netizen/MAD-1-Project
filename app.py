@@ -1,8 +1,11 @@
 from contextlib import closing
+import getpass
 from pathlib import Path
 import sqlite3
+import re
 
-from flask import Flask, redirect, render_template, request, url_for
+from flask import Flask, redirect, render_template, request, url_for, request
+from werkzeug.security import generate_password_hash
 
 app = Flask(__name__)
 database_path = Path(__file__).parent / "examinationapp.db"
@@ -263,29 +266,6 @@ with closing(sqlite3.connect(database_path)) as database:
     database.commit() 
 
 
-@app.route("/", methods=["GET", "POST"])
-def home():
-    with closing(sqlite3.connect(database_path)) as database:
-        if request.method == "POST":
-            name = request.form.get("name", "").strip()
-
-            if not name or len(name) > 100:
-                return "Enter a name between 1 and 100 characters.", 400
-
-            database.execute(
-                "INSERT INTO person (name) VALUES (?)",
-                (name,)
-            )
-            database.commit()
-
-            return redirect(url_for("home"))
-
-        names = database.execute(
-            "SELECT name FROM person ORDER BY id DESC"
-        ).fetchall()
-
-    return render_template("index.html", names=names)
-
 @app.route("/admin/courses", methods=["GET", "POST"])
 def admin_courses():
     error = None
@@ -334,4 +314,213 @@ def admin_courses():
         "admin_courses.html",
         courses=courses,
         error=error
+    )
+
+@app.cli.command("create-admin")
+def create_admin():
+    with closing(sqlite3.connect(database_path)) as database:
+        database.execute("PRAGMA foreign_keys = ON")
+
+        existing_admin = database.execute(
+            "SELECT user_id FROM users WHERE role = ?",
+            ("Admin",)
+        ).fetchone()
+
+        if existing_admin:
+            print("An admin already exists. No changes made.")
+            return
+
+        email = input("Admin email: ").strip().lower()
+        password = getpass("Admin password: ")
+        confirmation = getpass("Confirm password: ")
+
+        if not email or not password:
+            print("Email and password are required.")
+            return
+
+        if password != confirmation:
+            print("Passwords do not match. No account created.")
+            return
+
+        password_hash = generate_password_hash(password)
+
+        try:
+            database.execute(
+                """
+                INSERT INTO users (email, password_hash, role)
+                VALUES (?, ?, ?)
+                """,
+                (email, password_hash, "Admin")
+            )
+            database.commit()
+
+        except sqlite3.IntegrityError:
+            print("Account creation failed. Check whether the email exists.")
+            return
+
+        print("Admin account created.")
+
+def create_student(email, password, name, contact_details=""):
+    return _create_account(
+        email=email,
+        password=password,
+        name=name,
+        contact_details=contact_details,
+        role="Student"
+    )
+
+def create_examiner(
+    email, password, name, contact_details="", department=""
+):
+    return _create_account(
+        email=email,
+        password=password,
+        name=name,
+        contact_details=contact_details,
+        role="Examiner",
+        department=department
+    )
+
+def _create_account(
+    email, password, name, contact_details, role, department=""
+):
+    # Normalize text, but preserve the password exactly as entered.
+    email = email.strip().lower()
+    name = name.strip()
+    contact_details = contact_details.strip()
+    department = department.strip()
+
+    if role not in ("Student", "Examiner"):
+        raise ValueError("Only students and examiners can register.")
+
+    if not email:
+        raise ValueError("Email is required.")
+
+    if not password:
+        raise ValueError("Password is required.")
+
+    if not 1 <= len(name) <= 150:
+        raise ValueError("Name must contain 1 to 150 characters.")
+
+    if len(department) > 100:
+        raise ValueError("Department must be at most 100 characters.")
+
+    with closing(sqlite3.connect(database_path)) as database:
+        database.execute("PRAGMA foreign_keys = ON")
+
+        with database:
+            existing_user = database.execute(
+                "SELECT user_id FROM users WHERE email = ?",
+                (email,)
+            ).fetchone()
+
+            if existing_user:
+                raise ValueError("An account with this email already exists.")
+
+            password_hash = generate_password_hash(password)
+
+            cursor = database.execute(
+                """
+                INSERT INTO users (email, password_hash, role)
+                VALUES (?, ?, ?)
+                """,
+                (email, password_hash, role)
+            )
+
+            user_id = cursor.lastrowid
+
+            if role == "Student":
+                database.execute(
+                    """
+                    INSERT INTO student (
+                        user_id, name, contact_details, status
+                    )
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (user_id, name, contact_details, "Active")
+                )
+
+            else:
+                database.execute(
+                    """
+                    INSERT INTO examiner_profile (
+                        user_id, name, contact_details, department, status
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        user_id, name, contact_details,
+                        department, "Pending"
+                    )
+                )
+
+    return user_id
+
+@app.route("/", methods=["GET", "POST"])
+def home():
+    error = None
+    values = {}
+
+    if request.method == "POST":
+        # Keep non-password values so errors don't erase the form.
+        values = {
+            "email": request.form.get("email", "").strip().lower(),
+            "name": request.form.get("name", "").strip(),
+            "contact_details": request.form.get(
+                "contact_details", ""
+            ).strip(),
+            "department": request.form.get("department", "").strip(),
+            "role": request.form.get("role", "")
+        }
+
+        password = request.form.get("password", "")
+        confirmation = request.form.get("confirm_password", "")
+
+        if values["role"] not in ("Student", "Examiner"):
+            error = "Choose Student or Examiner."
+
+        elif not re.fullmatch(
+            r"[^@\s]+@[^@\s]+\.[^@\s]+", values["email"]
+        ):
+            error = "Enter a valid email address."
+
+        elif password != confirmation:
+            error = "Passwords do not match."
+
+        else:
+            try:
+                if values["role"] == "Student":
+                    create_student(
+                        email=values["email"],
+                        password=password,
+                        name=values["name"],
+                        contact_details=values["contact_details"]
+                    )
+
+                else:
+                    create_examiner(
+                        email=values["email"],
+                        password=password,
+                        name=values["name"],
+                        contact_details=values["contact_details"],
+                        department=values["department"]
+                    )
+
+            except ValueError as exception:
+                error = str(exception)
+
+            except sqlite3.IntegrityError:
+                error = (
+                    "Registration could not be completed. "
+                    "The email may already be registered."
+                )
+
+            else:
+                return redirect(url_for("home", created="1"))
+
+    return render_template(
+        "index.html",
+        error=error,
+        values=values,
+        created=request.args.get("created") == "1"
     )

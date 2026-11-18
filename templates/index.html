@@ -2,23 +2,93 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>Name saver</title>
+    <title>Register</title>
 </head>
 <body>
-    <a href="{{ url_for('admin_courses') }}">Manage courses</a>
-    <h1>What is your name?</h1>
+    <h1>Create an account</h1>
+
+    {% if created %}
+        <p>
+            Account created. Examiner accounts need admin approval
+            before dashboard access.
+        </p>
+    {% endif %}
+
+    {% if error %}
+        <p role="alert">{{ error }}</p>
+    {% endif %}
 
     <form method="post">
-        <input name="name" maxlength="100" required>
-        <button type="submit">Save my name</button>
+        <p>
+            <label>
+                Email
+                <input type="email" name="email" required
+                       value="{{ values.get('email', '') }}">
+            </label>
+        </p>
+
+        <p>
+            <label>
+                Full name
+                <input type="text" name="name" maxlength="150"
+                       required value="{{ values.get('name', '') }}">
+            </label>
+        </p>
+
+        <p>
+            <label>
+                Account type
+                <select name="role" required>
+                    <option value="">Choose a role</option>
+                    <option value="Student"
+                        {% if values.get('role') == 'Student' %}
+                            selected
+                        {% endif %}>
+                        Student
+                    </option>
+                    <option value="Examiner"
+                        {% if values.get('role') == 'Examiner' %}
+                            selected
+                        {% endif %}>
+                        Examiner
+                    </option>
+                </select>
+            </label>
+        </p>
+
+        <p>
+            <label>
+                Contact details
+                <input type="text" name="contact_details"
+                       value="{{ values.get('contact_details', '') }}">
+            </label>
+        </p>
+
+        <p>
+            <label>
+                Department (optional, for examiners)
+                <input type="text" name="department" maxlength="100"
+                       value="{{ values.get('department', '') }}">
+            </label>
+        </p>
+
+        <p>
+            <label>
+                Password
+                <input type="password" name="password"
+                       autocomplete="new-password" required>
+            </label>
+        </p>
+
+        <p>
+            <label>
+                Confirm password
+                <input type="password" name="confirm_password"
+                       autocomplete="new-password" required>
+            </label>
+        </p>
+
+        <button type="submit">Register</button>
     </form>
-
-    <h2>Saved names</h2>
-
-    <ul>
-        {% for person in names %}
-            <li>{{ person[0] }}</li>
-        {% endfor %}
-    </ul>
 </body>
 </html>
