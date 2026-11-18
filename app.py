@@ -2121,6 +2121,7 @@ def examiner_evaluation(booking_id):
                         """
                         UPDATE evaluation
                         SET status = 'Submitted',
+                            is_published = 1,
                             submitted_by = ?,
                             submitted_at = CURRENT_TIMESTAMP
                         WHERE evaluation_id = ?
@@ -2737,8 +2738,13 @@ def student_history():
             LEFT JOIN evaluation v
                 ON v.booking_id = b.booking_id
             WHERE b.student_id = ?
-              AND b.status IN ('Booked', 'Completed')
-              AND (s.slot_date || ' ' || s.end_time) <= ?
+                AND (
+                    b.status = 'Completed'
+                    OR (
+                        b.status = 'Booked'
+                        AND (s.slot_date || ' ' || s.end_time) <= ?
+                    )
+                )
             ORDER BY s.slot_date DESC,
                      s.start_time DESC,
                      b.booking_id DESC

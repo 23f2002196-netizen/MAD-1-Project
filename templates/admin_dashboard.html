@@ -138,14 +138,6 @@
                                 <details>
                                     <summary>View dates</summary>
                                     <p>
-                                        Slot creation:
-                                        {{ exam['slot_creation_start_date']
-                                           or 'Not set' }}
-                                        to
-                                        {{ exam['slot_creation_end_date']
-                                           or 'Not set' }}
-                                    </p>
-                                    <p>
                                         Booking:
                                         {{ exam['slot_booking_start_date']
                                            or 'Not set' }}
@@ -172,7 +164,7 @@
                                     'admin_rubrics',
                                     exam_id=exam['exam_id']
                                 ) }}">Rubrics</a>
-                                
+
                                 <a href="{{ url_for(
                                     'assign_examiner',
                                     exam_id=exam['exam_id']
