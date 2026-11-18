@@ -1284,3 +1284,71 @@ def admin_rubrics(exam_id, rubric_id):
         rubrics=rubrics,
         error=error
     )
+
+@app.route(
+    "/admin/examiners/<int:examiner_id>/review",
+    methods=["GET", "POST"]
+)
+@require_role("Admin")
+def review_examiner(examiner_id):
+    error = None
+
+    if (
+        request.method == "POST"
+        and request.form.get("action") == "close"
+    ):
+        return redirect(url_for("dashboard"))
+
+    with closing(sqlite3.connect(database_path)) as database:
+        database.execute("PRAGMA foreign_keys = ON")
+        database.row_factory = sqlite3.Row
+
+        examiner = database.execute(
+            """
+            SELECT examiner_profile.*
+            FROM examiner_profile
+            JOIN users
+                ON users.user_id = examiner_profile.user_id
+            WHERE examiner_profile.examiner_id = ?
+              AND users.role = 'Examiner'
+            """,
+            (examiner_id,)
+        ).fetchone()
+
+        if examiner is None:
+            abort(404)
+
+        selected = {
+            "Approved": "approve",
+            "Rejected": "reject"
+        }.get(examiner["status"], "")
+
+        if request.method == "POST":
+            selected = request.form.get("decision", "")
+
+            if selected not in ("approve", "reject"):
+                error = "Choose Approve or Reject."
+
+            else:
+                new_status = (
+                    "Approved" if selected == "approve" else "Rejected"
+                )
+
+                database.execute(
+                    """
+                    UPDATE examiner_profile
+                    SET status = ?
+                    WHERE examiner_id = ?
+                    """,
+                    (new_status, examiner_id)
+                )
+                database.commit()
+
+                return redirect(url_for("dashboard"))
+
+    return render_template(
+        "review_examiner.html",
+        examiner=examiner,
+        selected=selected,
+        error=error
+    )

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Review examiner</title>
+</head>
+<body>
+    <h1>Review examiner</h1>
+
+    {% if error %}
+        <p role="alert">{{ error }}</p>
+    {% endif %}
+
+    <p>Current status: {{ examiner['status'] or 'Not set' }}</p>
+
+    <form method="post">
+        <p>
+            <label for="name">Name</label>
+            <input
+                id="name"
+                type="text"
+                value="{{ examiner['name'] }}"
+                readonly
+            >
+        </p>
+
+        <p>
+            <label for="contact_details">Contact details</label>
+            <input
+                id="contact_details"
+                type="text"
+                value="{{ examiner['contact_details'] or '' }}"
+                readonly
+            >
+        </p>
+
+        <p>
+            <label for="department">Department</label>
+            <input
+                id="department"
+                type="text"
+                value="{{ examiner['department'] or '' }}"
+                readonly
+            >
+        </p>
+
+        <fieldset>
+            <legend>Decision</legend>
+
+            <label>
+                <input
+                    type="radio"
+                    name="decision"
+                    value="approve"
+                    {% if selected == 'approve' %}checked{% endif %}
+                    required
+                >
+                Approve
+            </label>
+
+            <label>
+                <input
+                    type="radio"
+                    name="decision"
+                    value="reject"
+                    {% if selected == 'reject' %}checked{% endif %}
+                    required
+                >
+                Reject
+            </label>
+        </fieldset>
+
+        <p>
+            <button type="submit" name="action" value="update">
+                Update
+            </button>
+
+            <button
+                type="submit"
+                name="action"
+                value="close"
+                formnovalidate
+            >
+                Close
+            </button>
+        </p>
+    </form>
+</body>
+</html>
