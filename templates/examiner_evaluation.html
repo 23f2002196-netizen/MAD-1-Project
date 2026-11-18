@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Evaluate student</title>
+</head>
+<body>
+    <h1>Evaluate student</h1>
+
+    <p>Examination: {{ details['exam_name'] }}</p>
+    <p>Student: {{ details['student_name'] }}</p>
+
+    {% if error %}
+        <p role="alert">{{ error }}</p>
+    {% endif %}
+
+    {% if message %}
+        <p role="status">{{ message }}</p>
+    {% endif %}
+
+    {% if submitted %}
+        <p>This evaluation has been submitted and is read-only.</p>
+    {% endif %}
+
+    <form method="post">
+        <p>
+            <label>
+                Slot ID
+                <input type="number"
+                       value="{{ details['slot_id'] }}" readonly>
+            </label>
+        </p>
+
+        <p>
+            <label>
+                Student ID
+                <input type="number"
+                       value="{{ details['student_id'] }}" readonly>
+            </label>
+        </p>
+
+        <p>
+            <label>
+                Examination date
+                <input type="date"
+                       value="{{ details['slot_date'] }}" readonly>
+            </label>
+        </p>
+
+        <p>
+            Examination time:
+            {{ details['start_time'] }}–{{ details['end_time'] }}
+        </p>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Criterion</th>
+                    <th>Maximum marks</th>
+                    <th>Marks awarded</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                {% for criterion in criteria %}
+                    <tr>
+                        <td>
+                            <label for="marks_{{ criterion['rubric_id'] }}">
+                                {{ criterion['criterion_name'] }}
+                            </label>
+                            <p>{{ criterion['description'] or '' }}</p>
+                        </td>
+
+                        <td>{{ criterion['max_marks'] }}</td>
+
+                        <td>
+                            <input
+                                id="marks_{{ criterion['rubric_id'] }}"
+                                name="marks_{{ criterion['rubric_id'] }}"
+                                type="number"
+                                min="0"
+                                max="{{ criterion['max_marks'] }}"
+                                step="any"
+                                value="{{ marks.get(
+                                    criterion['rubric_id'], ''
+                                ) }}"
+                                required
+                                {% if submitted %}disabled{% endif %}
+                            >
+                        </td>
+
+                        <td>
+                            <button
+                                type="submit"
+                                name="action"
+                                value="save:{{ criterion['rubric_id'] }}"
+                                formnovalidate
+                                {% if submitted %}disabled{% endif %}
+                            >
+                                Save
+                            </button>
+                        </td>
+                    </tr>
+                {% else %}
+                    <tr>
+                        <td colspan="4">
+                            No rubric criteria have been defined.
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        {% if criteria and not submitted %}
+            <button type="submit" name="action" value="submit">
+                Submit
+            </button>
+        {% endif %}
+
+        <button type="submit" name="action" value="cancel"
+                formnovalidate>
+            Cancel
+        </button>
+    </form>
+</body>
+</html>

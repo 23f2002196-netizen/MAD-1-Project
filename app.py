@@ -285,7 +285,58 @@ with closing(sqlite3.connect(database_path)) as database:
         ON examiner_profile(user_id)
     """)
 
+    database.execute("""
+        CREATE TABLE IF NOT EXISTS evaluation (
+            evaluation_id INTEGER PRIMARY KEY,
+
+            booking_id INTEGER NOT NULL UNIQUE
+                REFERENCES booking(booking_id),
+
+            status TEXT NOT NULL DEFAULT 'Draft'
+                CHECK (status IN ('Draft', 'Submitted')),
+
+            submitted_by INTEGER
+                REFERENCES examiner_profile(examiner_id),
+
+            submitted_at TEXT
+        )
+    """)
+
+    database.execute("""
+        CREATE TABLE IF NOT EXISTS evaluation_score (
+            evaluation_id INTEGER NOT NULL
+                REFERENCES evaluation(evaluation_id),
+
+            rubric_id INTEGER NOT NULL
+                REFERENCES examination_rubric(rubric_id),
+
+            marks_awarded REAL NOT NULL
+                CHECK (
+                    typeof(marks_awarded) IN ('integer', 'real')
+                    AND marks_awarded >= 0
+                ),
+
+            PRIMARY KEY (evaluation_id, rubric_id)
+        )
+    """)
+
     database.commit() 
+
+def validate_awarded_marks(raw_value, maximum):
+    try:
+        marks = float(raw_value)
+    except (TypeError, ValueError):
+        raise ValueError("Enter a number for the awarded marks.")
+
+    if not math.isfinite(marks):
+        raise ValueError("Marks must be a finite number.")
+
+    if marks < 0 or marks > maximum:
+        raise ValueError(
+            f"Awarded marks must be between 0 and {maximum}."
+        )
+
+    return marks
 
 def account_is_enabled(database, user):
     if user["role"] == "Admin":
@@ -1771,4 +1822,237 @@ def examiner_availability():
         examination=examination,
         slots=slots,
         error=error
+    )
+
+@app.route(
+    "/examiner/bookings/<int:booking_id>/evaluate",
+    methods=["GET", "POST"]
+)
+@require_role("Examiner")
+def examiner_evaluation(booking_id):
+    if (
+        request.method == "POST"
+        and request.form.get("action") == "cancel"
+    ):
+        return redirect(url_for("dashboard"))
+
+    error = None
+    message = None
+
+    with closing(sqlite3.connect(database_path)) as database:
+        database.execute("PRAGMA foreign_keys = ON")
+        database.row_factory = sqlite3.Row
+
+        if request.method == "POST":
+            database.execute("BEGIN IMMEDIATE")
+
+        examiner = database.execute(
+            """
+            SELECT examiner_id FROM examiner_profile
+            WHERE user_id = ?
+            """,
+            (g.user["user_id"],)
+        ).fetchone()
+
+        if examiner is None:
+            abort(403)
+
+        details = database.execute(
+            """
+            SELECT
+                booking.booking_id,
+                booking.student_id,
+                booking.status AS booking_status,
+                student.name AS student_name,
+                examination_slot.slot_id,
+                examination_slot.exam_id,
+                examination_slot.examiner_id,
+                examination_slot.slot_date,
+                examination_slot.start_time,
+                examination_slot.end_time,
+                examination.exam_name
+            FROM booking
+            JOIN student
+                ON student.student_id = booking.student_id
+            JOIN examination_slot
+                ON examination_slot.slot_id = booking.slot_id
+            JOIN examination
+                ON examination.exam_id = examination_slot.exam_id
+            WHERE booking.booking_id = ?
+            """,
+            (booking_id,)
+        ).fetchone()
+
+        if details is None:
+            abort(404)
+
+        if details["examiner_id"] != examiner["examiner_id"]:
+            abort(403)
+
+        if details["booking_status"] not in ("Booked", "Completed"):
+            abort(403)
+
+        criteria = database.execute(
+            """
+            SELECT * FROM examination_rubric
+            WHERE exam_id = ?
+            ORDER BY rubric_id
+            """,
+            (details["exam_id"],)
+        ).fetchall()
+
+        evaluation = database.execute(
+            "SELECT * FROM evaluation WHERE booking_id = ?",
+            (booking_id,)
+        ).fetchone()
+
+        submitted = (
+            evaluation is not None
+            and evaluation["status"] == "Submitted"
+        )
+
+        marks = {}
+
+        if evaluation is not None:
+            saved_scores = database.execute(
+                """
+                SELECT rubric_id, marks_awarded
+                FROM evaluation_score
+                WHERE evaluation_id = ?
+                """,
+                (evaluation["evaluation_id"],)
+            ).fetchall()
+
+            marks = {
+                score["rubric_id"]: score["marks_awarded"]
+                for score in saved_scores
+            }
+
+        if request.method == "POST":
+            # Preserve typed values if validation fails or one row is saved.
+            for criterion in criteria:
+                rubric_id = criterion["rubric_id"]
+                marks[rubric_id] = request.form.get(
+                    f"marks_{rubric_id}", ""
+                )
+
+            try:
+                if submitted:
+                    raise ValueError(
+                        "This evaluation has already been submitted."
+                    )
+
+                if not criteria:
+                    raise ValueError(
+                        "The admin must define rubric criteria first."
+                    )
+
+                action = request.form.get("action", "")
+                chosen = []
+
+                if action == "submit":
+                    chosen = list(criteria)
+
+                elif action.startswith("save:"):
+                    selected_id = int(action.split(":", 1)[1])
+
+                    chosen = [
+                        criterion for criterion in criteria
+                        if criterion["rubric_id"] == selected_id
+                    ]
+
+                    if not chosen:
+                        raise ValueError("Invalid rubric criterion.")
+
+                else:
+                    raise ValueError("Unknown action.")
+
+                validated_scores = []
+
+                for criterion in chosen:
+                    rubric_id = criterion["rubric_id"]
+
+                    awarded = validate_awarded_marks(
+                        marks.get(rubric_id, ""),
+                        criterion["max_marks"]
+                    )
+
+                    validated_scores.append((rubric_id, awarded))
+
+                if evaluation is None:
+                    cursor = database.execute(
+                        """
+                        INSERT INTO evaluation (booking_id)
+                        VALUES (?)
+                        """,
+                        (booking_id,)
+                    )
+                    evaluation_id = cursor.lastrowid
+
+                else:
+                    evaluation_id = evaluation["evaluation_id"]
+
+                for rubric_id, awarded in validated_scores:
+                    database.execute(
+                        """
+                        INSERT INTO evaluation_score (
+                            evaluation_id, rubric_id, marks_awarded
+                        )
+                        VALUES (?, ?, ?)
+                        ON CONFLICT (evaluation_id, rubric_id)
+                        DO UPDATE SET
+                            marks_awarded = excluded.marks_awarded
+                        """,
+                        (evaluation_id, rubric_id, awarded)
+                    )
+
+                if action == "submit":
+                    database.execute(
+                        """
+                        UPDATE evaluation
+                        SET status = 'Submitted',
+                            submitted_by = ?,
+                            submitted_at = CURRENT_TIMESTAMP
+                        WHERE evaluation_id = ?
+                        """,
+                        (examiner["examiner_id"], evaluation_id)
+                    )
+
+                    database.execute(
+                        """
+                        UPDATE booking
+                        SET status = 'Completed'
+                        WHERE booking_id = ?
+                        """,
+                        (booking_id,)
+                    )
+
+                database.commit()
+
+                if action == "submit":
+                    return redirect(
+                        url_for(
+                            "examiner_evaluation",
+                            booking_id=booking_id
+                        )
+                    )
+
+                message = "Criterion saved as a draft."
+
+            except ValueError as exception:
+                database.rollback()
+                error = str(exception)
+
+            except sqlite3.IntegrityError:
+                database.rollback()
+                error = "The evaluation could not be saved."
+
+    return render_template(
+        "examiner_evaluation.html",
+        details=details,
+        criteria=criteria,
+        marks=marks,
+        submitted=submitted,
+        error=error,
+        message=message
     )
