@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Examination history</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 24px;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 16px 0;
+        }
+
+        th, td {
+            border: 1px solid #ccc;
+            padding: 8px;
+            text-align: left;
+            vertical-align: top;
+        }
+
+        th {
+            background: #f2f2f2;
+        }
+
+        .table-container {
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Examination history</h1>
+
+    <p>
+        {{ student['name'] }}
+        — Student ID {{ student['student_id'] }}
+    </p>
+
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Exam ID</th>
+                    <th>Examination</th>
+                    <th>Course</th>
+                    <th>Slot ID</th>
+                    <th>Date and time</th>
+                    <th>Status</th>
+                    <th>Details</th>
+                    <th>Scores</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                {% for record in history %}
+                    <tr>
+                        <td>{{ record['exam_id'] }}</td>
+                        <td>{{ record['exam_name'] }}</td>
+
+                        <td>
+                            {{ record['course_code'] }}
+                            — {{ record['course_name'] }}
+                        </td>
+
+                        <td>{{ record['slot_id'] }}</td>
+
+                        <td>
+                            {{ record['slot_date'] }}
+                            <br>
+                            {{ record['start_time'] }}
+                            – {{ record['end_time'] }}
+                        </td>
+
+                        <td>{{ record['booking_status'] }}</td>
+
+                        <td>
+                            <details>
+                                <summary>View details</summary>
+
+                                <p>Course ID: {{ record['course_id'] }}</p>
+                                <p>Type: {{ record['exam_type'] }}</p>
+                                <p>
+                                    Duration:
+                                    {{ record['duration'] }} minutes
+                                </p>
+                                <p>
+                                    Examination maximum marks:
+                                    {{ record['exam_max_marks'] }}
+                                </p>
+                                <p>{{ record['description'] or '' }}</p>
+                            </details>
+                        </td>
+
+                        <td>
+                            {% if record['scores'] %}
+                                <ul>
+                                    {% for score in record['scores'] %}
+                                        <li>
+                                            {{ score['criterion_name'] }}:
+                                            {{ score['marks_awarded'] }}
+                                            / {{ score['max_marks'] }}
+                                        </li>
+                                    {% endfor %}
+                                </ul>
+                            {% else %}
+                                Results not published
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% else %}
+                    <tr>
+                        <td colspan="8">
+                            No past examinations to show.
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <a href="{{ url_for('student_dashboard') }}">
+        Back to dashboard
+    </a>
+</body>
+</html>

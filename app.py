@@ -320,6 +320,18 @@ with closing(sqlite3.connect(database_path)) as database:
         )
     """)
 
+    evaluation_columns = {
+        row[1]
+        for row in database.execute("PRAGMA table_info(evaluation)")
+    }
+
+    if "is_published" not in evaluation_columns:
+        database.execute("""
+            ALTER TABLE evaluation
+            ADD COLUMN is_published INTEGER NOT NULL DEFAULT 0
+                CHECK (is_published IN (0, 1))
+        """)
+
     database.commit() 
 
 def validate_awarded_marks(raw_value, maximum):
@@ -2607,4 +2619,97 @@ def student_update_booking(slot_id):
         cancel_problem=cancel_problem,
         error=error,
         csrf_token=session["booking_csrf"]
+    )
+
+@app.route("/student/history")
+@require_role("Student")
+def student_history():
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    with closing(sqlite3.connect(database_path)) as database:
+        database.row_factory = sqlite3.Row
+
+        student = database.execute(
+            """
+            SELECT student_id, name
+            FROM student
+            WHERE user_id = ?
+            """,
+            (g.user["user_id"],)
+        ).fetchone()
+
+        if student is None:
+            abort(403)
+
+        rows = database.execute(
+            """
+            SELECT
+                b.booking_id,
+                b.status AS booking_status,
+                s.slot_id,
+                s.slot_date,
+                s.start_time,
+                s.end_time,
+                e.exam_id,
+                e.exam_name,
+                e.exam_type,
+                e.duration,
+                e.max_marks AS exam_max_marks,
+                c.course_id,
+                c.course_code,
+                c.course_name,
+                c.description,
+                v.evaluation_id,
+                v.status AS evaluation_status,
+                v.is_published
+            FROM booking b
+            JOIN examination_slot s
+                ON s.slot_id = b.slot_id
+            JOIN examination e
+                ON e.exam_id = s.exam_id
+            JOIN course c
+                ON c.course_id = e.course_id
+            LEFT JOIN evaluation v
+                ON v.booking_id = b.booking_id
+            WHERE b.student_id = ?
+              AND b.status IN ('Booked', 'Completed')
+              AND (s.slot_date || ' ' || s.end_time) <= ?
+            ORDER BY s.slot_date DESC,
+                     s.start_time DESC,
+                     b.booking_id DESC
+            """,
+            (student["student_id"], now)
+        ).fetchall()
+
+        history = []
+
+        for row in rows:
+            record = dict(row)
+            record["scores"] = []
+
+            if (
+                record["evaluation_status"] == "Submitted"
+                and record["is_published"] == 1
+            ):
+                record["scores"] = database.execute(
+                    """
+                    SELECT
+                        r.criterion_name,
+                        r.max_marks,
+                        sc.marks_awarded
+                    FROM evaluation_score sc
+                    JOIN examination_rubric r
+                        ON r.rubric_id = sc.rubric_id
+                    WHERE sc.evaluation_id = ?
+                    ORDER BY r.rubric_id
+                    """,
+                    (record["evaluation_id"],)
+                ).fetchall()
+
+            history.append(record)
+
+    return render_template(
+        "student_history.html",
+        student=student,
+        history=history
     )
