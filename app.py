@@ -1500,6 +1500,11 @@ def registered_students():
 @app.route("/admin/dashboard")
 @require_role("Admin")
 def admin_dashboard():
+    section = request.args.get("section", "all")
+
+    if section not in ("all", "courses", "examinations", "examiners"):
+        abort(400)
+        
     with closing(sqlite3.connect(database_path)) as database:
         database.row_factory = sqlite3.Row
 
