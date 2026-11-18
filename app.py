@@ -1141,6 +1141,7 @@ def examination_slots(exam_id, slot_id):
     methods=["GET", "POST"]
 )
 @require_role("Admin")
+
 def admin_rubrics(exam_id, rubric_id):
     error = None
     values = {
@@ -1352,3 +1353,111 @@ def review_examiner(examiner_id):
         selected=selected,
         error=error
     )
+
+@app.route("/admin/students/bookings", methods=["GET"])
+@require_role("Admin")
+def registered_students():
+    if request.args.get("action") == "close":
+        return redirect(url_for("dashboard"))
+
+    student_id_text = request.args.get("student_id", "").strip()
+    exam_id_text = request.args.get("exam_id", "").strip()
+    searched = "student_id" in request.args
+
+    error = None
+    student = None
+    bookings = []
+
+    with closing(sqlite3.connect(database_path)) as database:
+        database.row_factory = sqlite3.Row
+
+        examinations = database.execute(
+            """
+            SELECT exam_id, exam_name
+            FROM examination
+            ORDER BY exam_id
+            """
+        ).fetchall()
+
+        if searched:
+            try:
+                student_id = int(student_id_text)
+                exam_id = int(exam_id_text) if exam_id_text else None
+
+                if student_id <= 0:
+                    raise ValueError
+
+                if exam_id is not None and exam_id <= 0:
+                    raise ValueError
+
+            except ValueError:
+                error = (
+                    "Enter a positive whole-number student ID "
+                    "and choose an examination if needed."
+                )
+
+            else:
+                student = database.execute(
+                    """
+                    SELECT student_id, name
+                    FROM student
+                    WHERE student_id = ?
+                    """,
+                    (student_id,)
+                ).fetchone()
+
+                if student is None:
+                    error = "No student exists with that student ID."
+
+                elif (
+                    exam_id is not None
+                    and exam_id not in {
+                        examination["exam_id"]
+                        for examination in examinations
+                    }
+                ):
+                    error = "Choose an existing examination."
+
+                else:
+                    query = """
+                        SELECT
+                            booking.booking_id,
+                            examination.course_id,
+                            examination.exam_id,
+                            booking.slot_id,
+                            booking.booking_date,
+                            booking.status
+                        FROM booking
+                        JOIN examination_slot
+                            ON examination_slot.slot_id = booking.slot_id
+                        JOIN examination
+                            ON examination.exam_id = examination_slot.exam_id
+                        WHERE booking.student_id = ?
+                    """
+
+                    parameters = [student_id]
+
+                    if exam_id is not None:
+                        query += " AND examination.exam_id = ?"
+                        parameters.append(exam_id)
+
+                    query += """
+                        ORDER BY booking.booking_date DESC,
+                                 booking.booking_id DESC
+                    """
+
+                    bookings = database.execute(
+                        query, parameters
+                    ).fetchall()
+
+    return render_template(
+        "registered_students.html",
+        examinations=examinations,
+        student=student,
+        bookings=bookings,
+        student_id_text=student_id_text,
+        exam_id_text=exam_id_text,
+        searched=searched,
+        error=error
+    )
+

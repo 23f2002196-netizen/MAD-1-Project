@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Registered students</title>
+</head>
+<body>
+    <h1>Registered students</h1>
+
+    {% if error %}
+        <p role="alert">{{ error }}</p>
+    {% endif %}
+
+    <form method="get" action="{{ url_for('registered_students') }}">
+        <p>
+            <label for="exam_id">Select exam ID (optional)</label>
+
+            <select id="exam_id" name="exam_id">
+                <option value="">All examinations</option>
+
+                {% for examination in examinations %}
+                    <option
+                        value="{{ examination['exam_id'] }}"
+                        {% if exam_id_text ==
+                            (examination['exam_id'] | string) %}
+                            selected
+                        {% endif %}
+                    >
+                        {{ examination['exam_id'] }}
+                        — {{ examination['exam_name'] }}
+                    </option>
+                {% endfor %}
+            </select>
+        </p>
+
+        <p>
+            <label for="student_id">Search by student ID</label>
+            <input
+                id="student_id"
+                name="student_id"
+                type="number"
+                min="1"
+                step="1"
+                value="{{ student_id_text }}"
+                required
+            >
+        </p>
+
+        <button type="submit" name="action" value="search">
+            Search
+        </button>
+
+        <button
+            type="submit"
+            name="action"
+            value="close"
+            formnovalidate
+        >
+            Close
+        </button>
+    </form>
+
+    {% if searched and not error %}
+        <h2>
+            {{ student['name'] }}
+            — Student ID {{ student['student_id'] }}
+        </h2>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Booking ID</th>
+                    <th>Course ID</th>
+                    <th>Exam ID</th>
+                    <th>Slot ID</th>
+                    <th>Slot booking date</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                {% for booking in bookings %}
+                    <tr>
+                        <td>{{ booking['booking_id'] }}</td>
+                        <td>{{ booking['course_id'] }}</td>
+                        <td>{{ booking['exam_id'] }}</td>
+                        <td>{{ booking['slot_id'] }}</td>
+                        <td>{{ booking['booking_date'] }}</td>
+                        <td>{{ booking['status'] }}</td>
+                    </tr>
+                {% else %}
+                    <tr>
+                        <td colspan="6">
+                            No bookings match this search.
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+</body>
+</html>
