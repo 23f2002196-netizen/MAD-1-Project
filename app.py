@@ -1574,6 +1574,20 @@ def admin_dashboard():
             "SELECT * FROM examiner_profile ORDER BY examiner_id"
         ).fetchall()
 
+        slots = database.execute(
+            """
+            SELECT
+                slot_id,
+                exam_id,
+                slot_date,
+                start_time,
+                end_time,
+                examiner_id
+            FROM examination_slot
+            ORDER BY exam_id, slot_date, start_time
+            """
+        ).fetchall()
+
         totals = {
             "courses": len(courses),
             "examinations": len(examinations),
@@ -1594,15 +1608,26 @@ def admin_dashboard():
         courses=courses,
         examinations=examinations,
         examiners=examiners,
-        totals=totals
+        totals=totals,
+        section=section,
+        slots=slots
     )
 
 def save_slot_availability(
     database, exam_id, examiner_id, is_admin, selected_ids, only_slot_id=None
 ):
     slots = database.execute(
-        "SELECT * FROM examination_slot WHERE exam_id = ?",
-        (exam_id,)
+        """
+        SELECT
+            slot_id,
+            exam_id,
+            slot_date,
+            start_time,
+            end_time,
+            examiner_id
+        FROM examination_slot
+        ORDER BY exam_id, slot_date, start_time
+        """
     ).fetchall()
 
     valid_ids = {slot["slot_id"] for slot in slots}

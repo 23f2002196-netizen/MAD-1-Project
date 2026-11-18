@@ -64,6 +64,15 @@
             </select>
         </p>
 
+        <p>
+            <label>
+                Examiner ID
+                <button type="submit" name="action" value="change">
+                    Change Examiner
+                </button>
+            </label>
+        </p>
+
         <button type="submit" name="action" value="update">
             Update
         </button>
@@ -99,6 +108,13 @@
                     <td>{{ slot['max_student_capacity'] }}</td>
                     <td>{{ slot['available_seats'] }}</td>
                     <td>{{ slot['status'] }}</td>
+                    <td>
+                        {% if slot['examiner_id'] is not none %}
+                            {{ slot['examiner_id'] }}
+                        {% else %}
+                            Unassigned
+                        {% endif %}
+                    </td>
                     <td>
                         <a href="{{ url_for(
                             'examination_slots',
