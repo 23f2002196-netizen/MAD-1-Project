@@ -10,6 +10,22 @@ database_path = Path(__file__).parent / "examinationapp.db"
 with closing(sqlite3.connect(database_path)) as database:
     database.execute("PRAGMA foreign_keys = ON")
 
+    # user login table 
+    database.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+
+            email TEXT NOT NULL UNIQUE
+                CHECK (length(trim(email)) > 0),
+
+            password_hash TEXT NOT NULL
+                CHECK (length(password_hash) > 0),
+
+            role TEXT NOT NULL
+                CHECK (role IN ('Admin', 'Examiner', 'Student'))
+        );
+    """)
+    
     # course table
     database.execute("""
         CREATE TABLE IF NOT EXISTS course (
@@ -208,7 +224,9 @@ with closing(sqlite3.connect(database_path)) as database:
     # examiner profile
     database.execute("""
         CREATE TABLE IF NOT EXISTS examiner_profile (
-            examiner_id INTEGER PRIMARY KEY
+            examiner_id INTEGER PRIMARY KEY,
+
+            user_id INTEGER NOT NULL
                 REFERENCES users(user_id),
 
             name TEXT NOT NULL
@@ -227,7 +245,9 @@ with closing(sqlite3.connect(database_path)) as database:
     # student 
     database.execute("""
         CREATE TABLE IF NOT EXISTS student (
-            student_id INTEGER PRIMARY KEY
+            student_id INTEGER PRIMARY KEY,
+
+            user_id INTEGER NOT NULL
                 REFERENCES users(user_id),
 
             name TEXT NOT NULL
