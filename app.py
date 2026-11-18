@@ -1504,7 +1504,7 @@ def admin_dashboard():
 
     if section not in ("all", "courses", "examinations", "examiners"):
         abort(400)
-        
+
     with closing(sqlite3.connect(database_path)) as database:
         database.row_factory = sqlite3.Row
 
@@ -1543,3 +1543,232 @@ def admin_dashboard():
         totals=totals
     )
 
+def save_slot_availability(
+    database, exam_id, examiner_id, is_admin, selected_ids, only_slot_id=None
+):
+    slots = database.execute(
+        "SELECT * FROM examination_slot WHERE exam_id = ?",
+        (exam_id,)
+    ).fetchall()
+
+    valid_ids = {slot["slot_id"] for slot in slots}
+
+    if not selected_ids.issubset(valid_ids):
+        raise ValueError("A selected slot does not belong to this examination.")
+
+    if only_slot_id is not None and only_slot_id not in valid_ids:
+        raise ValueError("That slot does not belong to this examination.")
+
+    for slot in slots:
+        slot_id = slot["slot_id"]
+
+        if only_slot_id is not None and slot_id != only_slot_id:
+            continue
+
+        if slot["status"] in ("Cancelled", "Completed"):
+            if only_slot_id is not None:
+                raise ValueError("Cancelled or completed slots cannot change.")
+            continue
+
+        current_examiner = slot["examiner_id"]
+        checked = slot_id in selected_ids
+
+        # Unchecked slots belonging to someone else remain untouched.
+        if not checked and current_examiner != examiner_id:
+            continue
+
+        # Already assigned as requested: nothing to change.
+        if checked and current_examiner == examiner_id:
+            continue
+
+        if checked and current_examiner is not None and not is_admin:
+            raise ValueError("You cannot replace another examiner.")
+
+        bookings = database.execute(
+            """
+            SELECT COUNT(*) FROM booking
+            WHERE slot_id = ?
+              AND status IN ('Booked', 'Completed')
+            """,
+            (slot_id,)
+        ).fetchone()[0]
+
+        if not checked and bookings:
+            raise ValueError(
+                "A slot with bookings cannot be left unassigned. "
+                "An admin can reassign it to another examiner."
+            )
+
+        if checked and bookings and not is_admin:
+            raise ValueError(
+                "An admin must assign this slot because it has bookings."
+            )
+
+        new_examiner = examiner_id if checked else None
+
+        database.execute(
+            """
+            UPDATE examination_slot
+            SET examiner_id = ?
+            WHERE slot_id = ? AND exam_id = ?
+            """,
+            (new_examiner, slot_id, exam_id)
+        )
+
+@app.route("/availability", methods=["GET", "POST"])
+@require_role("Admin", "Examiner")
+def examiner_availability():
+    if (
+        request.method == "POST"
+        and request.form.get("action") == "cancel"
+    ):
+        return redirect(url_for("dashboard"))
+
+    is_admin = g.user["role"] == "Admin"
+    source = request.form if request.method == "POST" else request.args
+
+    exam_id_text = source.get("exam_id", "").strip()
+    examiner_id_text = source.get("examiner_id", "").strip()
+
+    examination = None
+    examiner_id = None
+    slots = []
+    error = None
+
+    with closing(sqlite3.connect(database_path)) as database:
+        database.execute("PRAGMA foreign_keys = ON")
+        database.row_factory = sqlite3.Row
+
+        if not is_admin:
+            profile = database.execute(
+                """
+                SELECT examiner_id FROM examiner_profile
+                WHERE user_id = ?
+                """,
+                (g.user["user_id"],)
+            ).fetchone()
+
+            if profile is None:
+                abort(403)
+
+            # Ignore any submitted examiner ID.
+            examiner_id_text = str(profile["examiner_id"])
+
+        if exam_id_text or request.method == "POST":
+            try:
+                exam_id = int(exam_id_text)
+                examiner_id = int(examiner_id_text)
+
+                if request.method == "POST":
+                    database.execute("BEGIN IMMEDIATE")
+
+                examination = database.execute(
+                    "SELECT * FROM examination WHERE exam_id = ?",
+                    (exam_id,)
+                ).fetchone()
+
+                if examination is None:
+                    raise ValueError("Enter an existing examination ID.")
+
+                target = database.execute(
+                    """
+                    SELECT examiner_profile.examiner_id
+                    FROM examiner_profile
+                    JOIN users
+                        ON users.user_id = examiner_profile.user_id
+                    WHERE examiner_profile.examiner_id = ?
+                      AND examiner_profile.status = 'Approved'
+                      AND users.role = 'Examiner'
+                    """,
+                    (examiner_id,)
+                ).fetchone()
+
+                if target is None:
+                    raise ValueError("Enter an approved examiner's profile ID.")
+
+                if not is_admin:
+                    assigned = database.execute(
+                        """
+                        SELECT slot_id FROM examination_slot
+                        WHERE exam_id = ? AND examiner_id = ?
+                        LIMIT 1
+                        """,
+                        (exam_id, examiner_id)
+                    ).fetchone()
+
+                    if assigned is None:
+                        abort(403)
+
+                slots = database.execute(
+                    """
+                    SELECT * FROM examination_slot
+                    WHERE exam_id = ?
+                    ORDER BY slot_date, start_time
+                    """,
+                    (exam_id,)
+                ).fetchall()
+
+                if request.method == "POST":
+                    action = request.form.get("action", "update")
+                    only_slot_id = None
+
+                    if action.startswith("save:"):
+                        only_slot_id = int(action.split(":", 1)[1])
+                    elif action != "update":
+                        raise ValueError("Unknown action.")
+
+                    selected_ids = {
+                        int(value)
+                        for value in request.form.getlist("available_slot_ids")
+                    }
+
+                    save_slot_availability(
+                        database,
+                        exam_id,
+                        examiner_id,
+                        is_admin,
+                        selected_ids,
+                        only_slot_id
+                    )
+                    database.commit()
+
+                    # If an examiner released their final slot, return home.
+                    if not is_admin:
+                        still_assigned = database.execute(
+                            """
+                            SELECT slot_id FROM examination_slot
+                            WHERE exam_id = ? AND examiner_id = ?
+                            LIMIT 1
+                            """,
+                            (exam_id, examiner_id)
+                        ).fetchone()
+
+                        if still_assigned is None:
+                            return redirect(url_for("dashboard"))
+
+                    return redirect(
+                        url_for(
+                            "examiner_availability",
+                            exam_id=exam_id,
+                            examiner_id=examiner_id
+                        )
+                    )
+
+            except ValueError as exception:
+                database.rollback()
+                error = str(exception)
+
+            except sqlite3.IntegrityError:
+                database.rollback()
+                error = "Availability could not be saved."
+
+    return render_template(
+        "examiner_availability.html",
+        is_admin=is_admin,
+        exam_id_text=exam_id_text,
+        examiner_id_text=examiner_id_text,
+        examiner_id=examiner_id,
+        examination=examination,
+        slots=slots,
+        error=error
+    )

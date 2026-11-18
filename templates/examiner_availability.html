@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Examiner availability</title>
+</head>
+<body>
+    <h1>Examiner availability</h1>
+
+    {% if error %}
+        <p role="alert">{{ error }}</p>
+    {% endif %}
+
+    <form method="get">
+        <p>
+            <label>
+                Exam ID
+                <input name="exam_id" type="number" min="1"
+                       value="{{ exam_id_text }}" required>
+            </label>
+        </p>
+
+        <p>
+            <label>
+                Examiner ID
+                <input name="examiner_id" type="number" min="1"
+                       value="{{ examiner_id_text }}"
+                       {% if not is_admin %}readonly{% endif %}
+                       required>
+            </label>
+        </p>
+
+        <button type="submit">Show slots</button>
+    </form>
+
+    {% if examination and examiner_id is not none and not error %}
+        <h2>{{ examination['exam_name'] }}</h2>
+    {% endif %}
+
+    <form method="post">
+        <input type="hidden" name="exam_id" value="{{ exam_id_text }}">
+        <input type="hidden" name="examiner_id"
+               value="{{ examiner_id_text }}">
+
+        {% if slots %}
+            <h2>Select your available slots</h2>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Slot ID</th>
+                        <th>Exam ID</th>
+                        <th>Exam date</th>
+                        <th>Start time</th>
+                        <th>End time</th>
+                        <th>Assigned examiner</th>
+                        <th>Availability</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for slot in slots %}
+                        {% set locked =
+                            slot['status'] in ('Cancelled', 'Completed')
+                            or (
+                                not is_admin
+                                and slot['examiner_id'] is not none
+                                and slot['examiner_id'] != examiner_id
+                            )
+                        %}
+
+                        <tr>
+                            <td>{{ slot['slot_id'] }}</td>
+                            <td>{{ slot['exam_id'] }}</td>
+                            <td>{{ slot['slot_date'] }}</td>
+                            <td>{{ slot['start_time'] }}</td>
+                            <td>{{ slot['end_time'] }}</td>
+                            <td>
+                                {{ slot['examiner_id']
+                                   if slot['examiner_id'] is not none
+                                   else 'Unassigned' }}
+                            </td>
+                            <td>
+                                <input
+                                    type="checkbox"
+                                    name="available_slot_ids"
+                                    value="{{ slot['slot_id'] }}"
+                                    aria-label="Available for slot {{ slot['slot_id'] }}"
+                                    {% if slot['examiner_id'] == examiner_id %}
+                                        checked
+                                    {% endif %}
+                                    {% if locked %}disabled{% endif %}
+                                >
+                            </td>
+                            <td>
+                                <button
+                                    type="submit"
+                                    name="action"
+                                    value="save:{{ slot['slot_id'] }}"
+                                    {% if locked %}disabled{% endif %}
+                                >
+                                    Save
+                                </button>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            <button type="submit" name="action" value="update">
+                Update
+            </button>
+        {% elif examination and not error %}
+            <p>No slots exist for this examination.</p>
+        {% endif %}
+
+        <button type="submit" name="action" value="cancel"
+                formnovalidate>
+            Cancel
+        </button>
+    </form>
+</body>
+</html>
