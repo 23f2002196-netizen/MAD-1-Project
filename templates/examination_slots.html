@@ -2,10 +2,129 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Examination slots</title>
 </head>
 <body>
-    <h1>Slots: {{ examination['exam_name'] }}</h1>
+    <h1>
+        {% if slot_id is not none %}
+            Edit slot
+        {% else %}
+            Create slot
+        {% endif %}
+    </h1>
+
+    <p>{{ examination['exam_name'] }}</p>
+
+    {% if error %}
+        <p role="alert">{{ error }}</p>
+    {% endif %}
+
+    <form method="post">
+        <p>
+            <label for="exam_id">Exam ID</label>
+            <input id="exam_id" type="number"
+                   value="{{ examination['exam_id'] }}" readonly>
+        </p>
+
+        <p>
+            <label for="slot_date">Date</label>
+            <input id="slot_date" name="slot_date" type="date"
+                   value="{{ values['slot_date'] }}" required>
+        </p>
+
+        <p>
+            <label for="start_time">Start time</label>
+            <input id="start_time" name="start_time" type="time"
+                   step="1" value="{{ values['start_time'] }}" required>
+        </p>
+
+        <p>
+            <label for="end_time">End time</label>
+            <input id="end_time" name="end_time" type="time"
+                   step="1" value="{{ values['end_time'] }}" required>
+        </p>
+
+        <p>
+            <label for="capacity">Maximum capacity</label>
+            <input id="capacity" name="max_student_capacity"
+                   type="number" min="1" step="1"
+                   value="{{ values['max_student_capacity'] }}" required>
+        </p>
+
+        <p>
+            <label for="status">Status</label>
+            <select id="status" name="status" required>
+                {% for option in allowed_statuses %}
+                    <option value="{{ option }}"
+                        {% if values['status'] == option %}selected{% endif %}>
+                        {{ option }}
+                    </option>
+                {% endfor %}
+            </select>
+        </p>
+
+        <button type="submit" name="action" value="update">
+            Update
+        </button>
+
+        <button type="submit" name="action" value="cancel"
+                formnovalidate>
+            Cancel
+        </button>
+    </form>
+
+    <h2>Existing slots</h2>
+
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Date</th>
+                <th>Start</th>
+                <th>End</th>
+                <th>Capacity</th>
+                <th>Available seats</th>
+                <th>Status</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for slot in slots %}
+                <tr>
+                    <td>{{ slot['slot_id'] }}</td>
+                    <td>{{ slot['slot_date'] }}</td>
+                    <td>{{ slot['start_time'] }}</td>
+                    <td>{{ slot['end_time'] }}</td>
+                    <td>{{ slot['max_student_capacity'] }}</td>
+                    <td>{{ slot['available_seats'] }}</td>
+                    <td>{{ slot['status'] }}</td>
+                    <td>
+                        <a href="{{ url_for(
+                            'examination_slots',
+                            exam_id=examination['exam_id'],
+                            slot_id=slot['slot_id']
+                        ) }}">
+                            Edit
+                        </a>
+                    </td>
+                </tr>
+            {% else %}
+                <tr>
+                    <td colspan="8">No slots yet.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <p>
+        <a href="{{ url_for(
+            'examination_slots',
+            exam_id=examination['exam_id']
+        ) }}">
+            Create another slot
+        </a>
+    </p>
 
     <a href="{{ url_for(
         'examination_form',

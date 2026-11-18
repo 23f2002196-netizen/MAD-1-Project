@@ -6,11 +6,10 @@ import re
 import os
 import secrets
 from functools import wraps
-
+from datetime import date, time
 from flask import (
     Flask, abort, g, redirect, render_template, request, session, url_for
 )
-
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
@@ -168,7 +167,7 @@ with closing(sqlite3.connect(database_path)) as database:
             exam_id INTEGER NOT NULL
                 REFERENCES examination(exam_id),
 
-            examiner_id INTEGER NOT NULL
+            examiner_id INTEGER
                 REFERENCES examiner_profile(examiner_id),
 
             slot_date TEXT NOT NULL
@@ -927,4 +926,206 @@ def examination_slots(exam_id):
     return render_template(
         "examination_slots.html",
         examination=examination
+    )
+
+@app.route(
+    "/admin/examinations/<int:exam_id>/slots",
+    defaults={"slot_id": None},
+    methods=["GET", "POST"]
+)
+@app.route(
+    "/admin/examinations/<int:exam_id>/slots/<int:slot_id>/edit",
+    methods=["GET", "POST"]
+)
+
+@require_role("Admin")
+def examination_slots(exam_id, slot_id):
+    error = None
+    allowed_statuses = ("Available", "Full", "Cancelled", "Completed")
+
+    values = {
+        "slot_date": "",
+        "start_time": "",
+        "end_time": "",
+        "max_student_capacity": "",
+        "status": "Available"
+    }
+
+    if (
+        request.method == "POST"
+        and request.form.get("action") == "cancel"
+    ):
+        return redirect(
+            url_for("examination_form", exam_id=exam_id)
+        )
+
+    with closing(sqlite3.connect(database_path)) as database:
+        database.execute("PRAGMA foreign_keys = ON")
+        database.row_factory = sqlite3.Row
+
+        examination = database.execute(
+            "SELECT exam_id, exam_name FROM examination WHERE exam_id = ?",
+            (exam_id,)
+        ).fetchone()
+
+        if examination is None:
+            abort(404)
+
+        if slot_id is not None:
+            slot = database.execute(
+                """
+                SELECT * FROM examination_slot
+                WHERE slot_id = ? AND exam_id = ?
+                """,
+                (slot_id, exam_id)
+            ).fetchone()
+
+            if slot is None:
+                abort(404)
+
+            values = dict(slot)
+
+        if request.method == "POST":
+            values = {
+                "slot_date": request.form.get("slot_date", ""),
+                "start_time": request.form.get("start_time", ""),
+                "end_time": request.form.get("end_time", ""),
+                "max_student_capacity": request.form.get(
+                    "max_student_capacity", ""
+                ),
+                "status": request.form.get("status", "")
+            }
+
+            try:
+                slot_date = date.fromisoformat(values["slot_date"])
+                start = time.fromisoformat(values["start_time"])
+                end = time.fromisoformat(values["end_time"])
+                capacity = int(values["max_student_capacity"])
+                status = values["status"]
+
+                if (
+                    start.tzinfo is not None
+                    or end.tzinfo is not None
+                    or start.microsecond
+                    or end.microsecond
+                ):
+                    raise ValueError(
+                        "Use local times with whole seconds."
+                    )
+
+                if end <= start:
+                    raise ValueError(
+                        "End time must be later than start time."
+                    )
+
+                if capacity <= 0:
+                    raise ValueError("Capacity must be greater than zero.")
+
+                if status not in allowed_statuses:
+                    raise ValueError("Choose a valid status.")
+
+                # Read bookings and save the slot in one transaction.
+                database.execute("BEGIN IMMEDIATE")
+
+                occupied = database.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM booking
+                    WHERE slot_id = ?
+                      AND status IN ('Booked', 'Completed')
+                    """,
+                    (slot_id,)
+                ).fetchone()[0]
+
+                if capacity < occupied:
+                    raise ValueError(
+                        "Capacity cannot be below existing bookings."
+                    )
+
+                available_seats = capacity - occupied
+
+                if status == "Full" and available_seats > 0:
+                    raise ValueError(
+                        "A slot can be Full only when no seats remain."
+                    )
+
+                if status == "Available" and available_seats == 0:
+                    status = "Full"
+
+                if slot_id is None:
+                    database.execute(
+                        """
+                        INSERT INTO examination_slot (
+                            exam_id, slot_date, start_time, end_time,
+                            max_student_capacity, available_seats, status
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            exam_id,
+                            slot_date.isoformat(),
+                            start.isoformat(),
+                            end.isoformat(),
+                            capacity,
+                            available_seats,
+                            status
+                        )
+                    )
+
+                else:
+                    database.execute(
+                        """
+                        UPDATE examination_slot
+                        SET slot_date = ?,
+                            start_time = ?,
+                            end_time = ?,
+                            max_student_capacity = ?,
+                            available_seats = ?,
+                            status = ?
+                        WHERE slot_id = ? AND exam_id = ?
+                        """,
+                        (
+                            slot_date.isoformat(),
+                            start.isoformat(),
+                            end.isoformat(),
+                            capacity,
+                            available_seats,
+                            status,
+                            slot_id,
+                            exam_id
+                        )
+                    )
+
+                database.commit()
+
+            except ValueError as exception:
+                database.rollback()
+                error = str(exception)
+
+            except sqlite3.IntegrityError:
+                database.rollback()
+                error = "The slot could not be saved."
+
+            else:
+                return redirect(
+                    url_for("examination_slots", exam_id=exam_id)
+                )
+
+        slots = database.execute(
+            """
+            SELECT * FROM examination_slot
+            WHERE exam_id = ?
+            ORDER BY slot_date, start_time
+            """,
+            (exam_id,)
+        ).fetchall()
+
+    return render_template(
+        "examination_slots.html",
+        examination=examination,
+        values=values,
+        slots=slots,
+        slot_id=slot_id,
+        allowed_statuses=allowed_statuses,
+        error=error
     )
