@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Manage courses</title>
+</head>
+<body>
+    <h1>Manage courses</h1>
+
+    {% if error %}
+        <p role="alert">{{ error }}</p>
+    {% endif %}
+
+    <h2>Create a course</h2>
+
+    <form method="post">
+        <p>
+            <label for="course_code">Course code</label>
+            <input id="course_code" name="course_code"
+                   type="number" min="1000" max="9999"
+                   step="1" required>
+        </p>
+
+        <p>
+            <label for="course_name">Course name</label>
+            <input id="course_name" name="course_name"
+                   type="text" required>
+        </p>
+
+        <p>
+            <label for="description">Description</label>
+            <textarea id="description" name="description"
+                      maxlength="200"></textarea>
+        </p>
+
+        <p>
+            <label for="status">Status</label>
+            <input id="status" name="status"
+                   type="text" maxlength="20">
+        </p>
+
+        <button type="submit">Create course</button>
+    </form>
+
+    <h2>Existing courses</h2>
+
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Code</th>
+                <th>Name</th>
+                <th>Description</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            {% for course in courses %}
+                <tr>
+                    <td>{{ course['course_id'] }}</td>
+                    <td>{{ course['course_code'] }}</td>
+                    <td>{{ course['course_name'] }}</td>
+                    <td>{{ course['description'] }}</td>
+                    <td>{{ course['status'] }}</td>
+                </tr>
+            {% else %}
+                <tr>
+                    <td colspan="5">No courses created yet.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>
