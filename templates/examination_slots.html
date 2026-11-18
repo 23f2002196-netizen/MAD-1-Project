@@ -66,10 +66,12 @@
 
         <p>
             <label>
-                Examiner ID
-                <a href="{{ url_for('examiner_availability') }}">
-                    Change Examiner
-                </a>
+            <a href="{{ url_for(
+                'assign_examiner',
+                exam_id=exam['exam_id']
+            ) }}">
+                Assign examiner
+            </a>
             </label>
         </p>
 

@@ -275,16 +275,19 @@ with closing(sqlite3.connect(database_path)) as database:
         );
     """)
 
+    # student user id - unique
     database.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS student_user_unique
         ON student(user_id)
     """)
 
+    # examiner user id - unique
     database.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS examiner_user_unique
         ON examiner_profile(user_id)
     """)
 
+    # evaluation table
     database.execute("""
         CREATE TABLE IF NOT EXISTS evaluation (
             evaluation_id INTEGER PRIMARY KEY,
@@ -302,6 +305,7 @@ with closing(sqlite3.connect(database_path)) as database:
         )
     """)
 
+    # evaluation score table
     database.execute("""
         CREATE TABLE IF NOT EXISTS evaluation_score (
             evaluation_id INTEGER NOT NULL
@@ -320,6 +324,7 @@ with closing(sqlite3.connect(database_path)) as database:
         )
     """)
 
+
     evaluation_columns = {
         row[1]
         for row in database.execute("PRAGMA table_info(evaluation)")
@@ -331,6 +336,19 @@ with closing(sqlite3.connect(database_path)) as database:
             ADD COLUMN is_published INTEGER NOT NULL DEFAULT 0
                 CHECK (is_published IN (0, 1))
         """)
+
+    # examiner assignment table
+    database.execute("""
+        CREATE TABLE IF NOT EXISTS examiner_assignment (
+            exam_id INTEGER NOT NULL
+                REFERENCES examination(exam_id),
+
+            examiner_id INTEGER NOT NULL
+                REFERENCES examiner_profile(examiner_id),
+
+            PRIMARY KEY (exam_id, examiner_id)
+        )
+    """)
 
     database.commit() 
 
@@ -1780,9 +1798,9 @@ def examiner_availability():
                 if not is_admin:
                     assigned = database.execute(
                         """
-                        SELECT slot_id FROM examination_slot
+                        SELECT exam_id
+                        FROM examiner_assignment
                         WHERE exam_id = ? AND examiner_id = ?
-                        LIMIT 1
                         """,
                         (exam_id, examiner_id)
                     ).fetchone()
@@ -2774,4 +2792,111 @@ def student_exam_details(exam_id):
         "student_exam_details.html",
         examination=examination,
         booked_slots=booked_slots
+    )
+
+@app.route(
+    "/admin/examinations/<int:exam_id>/assign-examiner",
+    methods=["GET", "POST"]
+)
+@require_role("Admin")
+def assign_examiner(exam_id):
+    error = None
+    selected_id = request.form.get("examiner_id", "")
+
+    if (
+        request.method == "POST"
+        and request.form.get("action") == "cancel"
+    ):
+        return redirect(url_for("admin_dashboard"))
+
+    if "assignment_csrf" not in session:
+        session["assignment_csrf"] = secrets.token_urlsafe(32)
+
+    with closing(sqlite3.connect(database_path)) as database:
+        database.execute("PRAGMA foreign_keys = ON")
+        database.row_factory = sqlite3.Row
+
+        examination = database.execute(
+            """
+            SELECT exam_id, exam_name
+            FROM examination
+            WHERE exam_id = ?
+            """,
+            (exam_id,)
+        ).fetchone()
+
+        if examination is None:
+            abort(404)
+
+        examiners = database.execute(
+            """
+            SELECT ep.examiner_id, ep.name
+            FROM examiner_profile ep
+            JOIN users u ON u.user_id = ep.user_id
+            WHERE ep.status = 'Approved'
+              AND u.role = 'Examiner'
+            ORDER BY ep.name, ep.examiner_id
+            """
+        ).fetchall()
+
+        if request.method == "POST":
+            token = request.form.get("csrf_token", "")
+
+            if not secrets.compare_digest(
+                token, session["assignment_csrf"]
+            ):
+                abort(400, "Form expired. Reload and try again.")
+
+            if request.form.get("action") != "assign":
+                abort(400)
+
+            try:
+                examiner_id = int(selected_id)
+            except ValueError:
+                error = "Choose an examiner."
+            else:
+                approved_ids = {
+                    examiner["examiner_id"]
+                    for examiner in examiners
+                }
+
+                if examiner_id not in approved_ids:
+                    error = "Choose an approved examiner."
+
+                else:
+                    database.execute(
+                        """
+                        INSERT INTO examiner_assignment (
+                            exam_id, examiner_id
+                        )
+                        VALUES (?, ?)
+                        ON CONFLICT (exam_id, examiner_id)
+                        DO NOTHING
+                        """,
+                        (exam_id, examiner_id)
+                    )
+                    database.commit()
+
+                    return redirect(url_for("admin_dashboard"))
+
+        assigned = database.execute(
+            """
+            SELECT ep.examiner_id, ep.name, ep.status
+            FROM examiner_assignment a
+            JOIN examiner_profile ep
+                ON ep.examiner_id = a.examiner_id
+            WHERE a.exam_id = ?
+            ORDER BY ep.name
+            """,
+            (exam_id,)
+        ).fetchall()
+
+    return render_template(
+        "assign_examiner.html",
+        examination=examination,
+        examiners=examiners,
+        assigned=assigned,
+        selected_id=selected_id,
+        csrf_token=session["assignment_csrf"],
+        error=error
     )
