@@ -7,12 +7,18 @@
 </head>
 <body>
     <h1>
-        {% if exam_id is not none %}
+        {% if delete_mode %}
+            Delete examination
+        {% elif exam_id is not none %}
             Edit examination
         {% else %}
             Add examination
         {% endif %}
     </h1>
+
+{% if delete_mode %}
+    <p>Confirm deletion of this examination.</p>
+{% endif %}
 
     {% if error %}
         <p role="alert">{{ error }}</p>
@@ -23,7 +29,7 @@
             Manage rubrics
         </a>
     {% endif %}
-    
+
     <form method="post">
         <p>
             <label for="course_code">Course code</label>
@@ -96,12 +102,23 @@
             >
         </p>
 
-        <button type="submit" name="action" value="slots">
-            Add slots
-        </button>
+        {% if delete_mode %}
+            <button type="submit" name="action" value="delete"
+                    formnovalidate>
+                Confirm delete
+            </button>
+        {% else %}
+            <button type="submit" name="action" value="slots">
+                Add slots
+            </button>
 
-        <button type="submit" name="action" value="update">
-            Update
+            <button type="submit" name="action" value="update">
+                Update
+            </button>
+        {% endif %}
+
+        <button type="submit" name="action" value="cancel" formnovalidate>
+            Cancel
         </button>
 
         <button

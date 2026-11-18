@@ -446,65 +446,7 @@ def require_role(*allowed_roles):
 @app.route("/admin/courses", methods=["GET", "POST"])
 @require_role("Admin")
 def admin_courses():
-    error = None
-
-    with closing(sqlite3.connect(database_path)) as database:
-        database.execute("PRAGMA foreign_keys = ON")
-        database.row_factory = sqlite3.Row
-
-        if request.method == "POST":
-            if request.form.get("action") == "cancel":
-                return redirect(url_for("dashboard"))
-
-            course_name = request.form.get("course_name", "").strip()
-            description = request.form.get("description", "").strip()
-            status = (
-                "Active"
-                if request.form.get("active") == "1"
-                else "Inactive"
-            )
-
-            course_name = request.form.get("course_name", "").strip()
-            description = request.form.get("description", "").strip()
-            status = request.form.get("status", "").strip()
-
-            try:
-                course_code = int(request.form.get("course_code", ""))
-
-                database.execute(
-                    """
-                    INSERT INTO course (
-                        course_code, course_name, description, status
-                    )
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (course_code, course_name, description, status)
-                )
-
-                database.commit()
-                return redirect(url_for("admin_courses"))
-
-            except ValueError:
-                error = "Enter a whole number for the course code."
-
-            except sqlite3.IntegrityError:
-                error = (
-                    "Check the course details: code must be 1000–9999; "
-                    "name must contain only English letters, numbers, "
-                    "and spaces and cannot be blank; description must "
-                    "be at most 200 characters and status at most 20."
-                )
-
-        
-        courses = database.execute(
-            "SELECT * FROM course ORDER BY course_id DESC"
-        ).fetchall()
-
-    return render_template(
-        "admin_courses.html",
-        courses=courses,
-        error=error
-    )
+    return redirect(url_for("admin_dashboard", _anchor="courses"))
 
 @app.cli.command("create-admin")
 def create_admin():
@@ -663,18 +605,32 @@ def login():
 @app.route("/dashboard")
 @require_role("Admin", "Examiner", "Student")
 def dashboard():
-    return render_template("dashboard.html")
+    if g.user["role"] == "Admin":
+        return redirect(url_for("admin_dashboard"))
 
+    return render_template("dashboard.html")
 
 @app.route("/logout", methods=["POST"])
 def logout():
     session.clear()
     return redirect(url_for("home"))
 
-@app.route("/admin/courses/new", methods=["GET", "POST"])
+@app.route(
+    "/admin/courses/new",
+    defaults={"course_id": None},
+    methods=["GET", "POST"]
+)
+@app.route(
+    "/admin/courses/<int:course_id>/edit",
+    methods=["GET", "POST"]
+)
 @require_role("Admin")
-def add_course():
+def add_course(course_id):
     error = None
+    delete_mode = (
+        course_id is not None
+        and request.args.get("mode") == "delete"
+    )
 
     values = {
         "course_code": "",
@@ -683,71 +639,132 @@ def add_course():
         "active": False
     }
 
-    # Use the admin dashboard once that route exists.
-    destination = (
-        "admin_dashboard"
-        if "admin_dashboard" in app.view_functions
-        else "admin_courses"
-    )
+    if (
+        request.method == "POST"
+        and request.form.get("action") == "cancel"
+    ):
+        return redirect(url_for("admin_dashboard"))
 
-    if request.method == "POST":
-        # Cancel before reading, validating, or saving course details.
-        if request.form.get("action") == "cancel":
-            return redirect(url_for(destination))
+    with closing(sqlite3.connect(database_path)) as database:
+        database.execute("PRAGMA foreign_keys = ON")
+        database.row_factory = sqlite3.Row
 
-        values = {
-            "course_code": request.form.get("course_code", "").strip(),
-            "course_name": request.form.get("course_name", "").strip(),
-            "description": request.form.get("description", "").strip(),
-            "active": request.form.get("active") == "1"
-        }
+        if course_id is not None:
+            course = database.execute(
+                "SELECT * FROM course WHERE course_id = ?",
+                (course_id,)
+            ).fetchone()
 
-        status = "Active" if values["active"] else "Inactive"
+            if course is None:
+                abort(404)
 
-        try:
-            course_code = int(values["course_code"])
+            values = {
+                "course_code": course["course_code"],
+                "course_name": course["course_name"],
+                "description": course["description"] or "",
+                "active": course["status"] == "Active"
+            }
 
-        except ValueError:
-            error = "Course code must be a whole number."
-
-        else:
-            with closing(sqlite3.connect(database_path)) as database:
-                database.execute("PRAGMA foreign_keys = ON")
+        if request.method == "POST":
+            if request.form.get("action") == "delete":
+                if course_id is None:
+                    abort(400)
 
                 try:
                     database.execute(
-                        """
-                        INSERT INTO course (
-                            course_code,
-                            course_name,
-                            description,
-                            status
-                        )
-                        VALUES (?, ?, ?, ?)
-                        """,
-                        (
-                            course_code,
-                            values["course_name"],
-                            values["description"],
-                            status
-                        )
+                        "DELETE FROM course WHERE course_id = ?",
+                        (course_id,)
                     )
                     database.commit()
 
                 except sqlite3.IntegrityError:
+                    database.rollback()
+                    delete_mode = True
                     error = (
-                        "Code must be 1000–9999. Name must be nonempty "
-                        "and contain only English letters, numbers, "
-                        "and spaces. Description must be at most "
+                        "This course has related records and cannot "
+                        "be deleted."
+                    )
+
+                else:
+                    return redirect(url_for("admin_dashboard"))
+
+            else:
+                values = {
+                    "course_code": request.form.get(
+                        "course_code", ""
+                    ).strip(),
+                    "course_name": request.form.get(
+                        "course_name", ""
+                    ).strip(),
+                    "description": request.form.get(
+                        "description", ""
+                    ).strip(),
+                    "active": request.form.get("active") == "1"
+                }
+
+                status = "Active" if values["active"] else "Inactive"
+
+                try:
+                    course_code = int(values["course_code"])
+
+                    if course_id is None:
+                        database.execute(
+                            """
+                            INSERT INTO course (
+                                course_code, course_name,
+                                description, status
+                            )
+                            VALUES (?, ?, ?, ?)
+                            """,
+                            (
+                                course_code,
+                                values["course_name"],
+                                values["description"],
+                                status
+                            )
+                        )
+
+                    else:
+                        database.execute(
+                            """
+                            UPDATE course
+                            SET course_code = ?,
+                                course_name = ?,
+                                description = ?,
+                                status = ?
+                            WHERE course_id = ?
+                            """,
+                            (
+                                course_code,
+                                values["course_name"],
+                                values["description"],
+                                status,
+                                course_id
+                            )
+                        )
+
+                    database.commit()
+
+                except ValueError:
+                    error = "Course code must be a whole number."
+
+                except sqlite3.IntegrityError:
+                    database.rollback()
+                    error = (
+                        "Use a code from 1000 to 9999, a nonempty "
+                        "name containing English letters, numbers "
+                        "and spaces, and a description of at most "
                         "200 characters."
                     )
 
                 else:
-                    return redirect(url_for(destination))
+                    return redirect(url_for("admin_dashboard"))
 
     return render_template(
-        "course_form.html",
+        "course.html",
         values=values,
+        course_id=course_id,
+        delete_mode=delete_mode,
         error=error
     )
 
@@ -763,6 +780,12 @@ def add_course():
 @require_role("Admin")
 def examination_form(exam_id):
     error = None
+
+    delete_mode = (
+        exam_id is not None
+        and request.args.get("mode") == "delete"
+    )
+
     values = {
         "course_code": "",
         "exam_name": "",
@@ -770,6 +793,33 @@ def examination_form(exam_id):
         "duration": "",
         "max_marks": ""
     }
+
+    if (
+        request.method == "POST"
+        and request.form.get("action") == "delete"
+    ):
+        if exam_id is None:
+            abort(400)
+
+        try:
+            database.execute(
+                "DELETE FROM examination WHERE exam_id = ?",
+                (exam_id,)
+            )
+            database.commit()
+
+        except sqlite3.IntegrityError:
+            database.rollback()
+
+        return render_template(
+            "examination_form.html",
+            values=values,
+            error=error,
+            exam_id=exam_id,
+            delete_mode=delete_mode
+        )
+
+        return redirect(url_for("admin_dashboard"))
 
     if (
         request.method == "POST"
@@ -910,7 +960,11 @@ def examination_form(exam_id):
         exam_id=exam_id
     )
 
-@app.route("/admin/examinations/<int:exam_id>/slots")
+@app.route(
+    "/admin/examinations/<int:exam_id>/slots",
+    defaults={"slot_id": None},
+    methods=["GET", "POST"]
+)
 @require_role("Admin")
 def examination_slots(exam_id):
     with closing(sqlite3.connect(database_path)) as database:
@@ -929,11 +983,6 @@ def examination_slots(exam_id):
         examination=examination
     )
 
-@app.route(
-    "/admin/examinations/<int:exam_id>/slots",
-    defaults={"slot_id": None},
-    methods=["GET", "POST"]
-)
 @app.route(
     "/admin/examinations/<int:exam_id>/slots/<int:slot_id>/edit",
     methods=["GET", "POST"]
@@ -1459,5 +1508,46 @@ def registered_students():
         exam_id_text=exam_id_text,
         searched=searched,
         error=error
+    )
+
+@app.route("/admin/dashboard")
+@require_role("Admin")
+def admin_dashboard():
+    with closing(sqlite3.connect(database_path)) as database:
+        database.row_factory = sqlite3.Row
+
+        courses = database.execute(
+            "SELECT * FROM course ORDER BY course_id"
+        ).fetchall()
+
+        examinations = database.execute(
+            "SELECT * FROM examination ORDER BY exam_id"
+        ).fetchall()
+
+        examiners = database.execute(
+            "SELECT * FROM examiner_profile ORDER BY examiner_id"
+        ).fetchall()
+
+        totals = {
+            "courses": len(courses),
+            "examinations": len(examinations),
+            "examiners": len(examiners),
+            "students": database.execute(
+                "SELECT COUNT(*) FROM student"
+            ).fetchone()[0],
+            "slots": database.execute(
+                "SELECT COUNT(*) FROM examination_slot"
+            ).fetchone()[0],
+            "bookings": database.execute(
+                "SELECT COUNT(*) FROM booking"
+            ).fetchone()[0]
+        }
+
+    return render_template(
+        "admin_dashboard.html",
+        courses=courses,
+        examinations=examinations,
+        examiners=examiners,
+        totals=totals
     )
 

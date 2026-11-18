@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Admin dashboard</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 24px;
+        }
+
+        nav a, .actions a {
+            margin-right: 12px;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 16px 0;
+        }
+
+        th, td {
+            border: 1px solid #ccc;
+            padding: 8px;
+            text-align: left;
+            vertical-align: top;
+        }
+
+        th {
+            background: #f2f2f2;
+        }
+
+        section {
+            margin-top: 32px;
+        }
+
+        .table-container {
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Admin dashboard</h1>
+    <p>Signed in as {{ g.user['email'] }}</p>
+
+    <nav>
+        <a href="{{ url_for('admin_dashboard') }}">Home</a>
+        <a href="#courses">Courses</a>
+        <a href="#examinations">Examinations</a>
+        <a href="#examiners">Examiners</a>
+        <a href="{{ url_for('registered_students') }}">Students</a>
+    </nav>
+
+    <p>
+        Courses: {{ totals['courses'] }} |
+        Examinations: {{ totals['examinations'] }} |
+        Examiners: {{ totals['examiners'] }} |
+        Students: {{ totals['students'] }} |
+        Slots: {{ totals['slots'] }} |
+        Bookings: {{ totals['bookings'] }}
+    </p>
+
+    <section id="courses">
+        <h2>Courses</h2>
+
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Course code</th>
+                        <th>Name</th>
+                        <th>Description</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for course in courses %}
+                        <tr>
+                            <td>{{ course['course_id'] }}</td>
+                            <td>{{ course['course_code'] }}</td>
+                            <td>{{ course['course_name'] }}</td>
+                            <td>{{ course['description'] or '' }}</td>
+                            <td>{{ course['status'] }}</td>
+                            <td class="actions">
+                                <a href="{{ url_for(
+                                    'add_course',
+                                    course_id=course['course_id']
+                                ) }}">Edit</a>
+
+                                <a href="{{ url_for(
+                                    'add_course',
+                                    course_id=course['course_id'],
+                                    mode='delete'
+                                ) }}">Delete</a>
+                            </td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="6">No courses yet.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <a href="{{ url_for('add_course') }}">Add new course</a>
+    </section>
+
+    <section id="examinations">
+        <h2>Examinations</h2>
+
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Course ID</th>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Duration</th>
+                        <th>Maximum marks</th>
+                        <th>Status</th>
+                        <th>Scheduling windows</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for exam in examinations %}
+                        <tr>
+                            <td>{{ exam['exam_id'] }}</td>
+                            <td>{{ exam['course_id'] }}</td>
+                            <td>{{ exam['exam_name'] }}</td>
+                            <td>{{ exam['exam_type'] }}</td>
+                            <td>{{ exam['duration'] }} minutes</td>
+                            <td>{{ exam['max_marks'] }}</td>
+                            <td>{{ exam['status'] }}</td>
+                            <td>
+                                <details>
+                                    <summary>View dates</summary>
+                                    <p>
+                                        Slot creation:
+                                        {{ exam['slot_creation_start_date']
+                                           or 'Not set' }}
+                                        to
+                                        {{ exam['slot_creation_end_date']
+                                           or 'Not set' }}
+                                    </p>
+                                    <p>
+                                        Booking:
+                                        {{ exam['slot_booking_start_date']
+                                           or 'Not set' }}
+                                        to
+                                        {{ exam['slot_booking_end_date']
+                                           or 'Not set' }}
+                                    </p>
+                                </details>
+                            </td>
+
+                            <td class="actions">
+                                <a href="{{ url_for(
+                                    'examination_form',
+                                    exam_id=exam['exam_id']
+                                ) }}">Edit</a>
+
+                                <a href="{{ url_for(
+                                    'examination_form',
+                                    exam_id=exam['exam_id'],
+                                    mode='delete'
+                                ) }}">Delete</a>
+
+                                <a href="{{ url_for(
+                                    'admin_rubrics',
+                                    exam_id=exam['exam_id']
+                                ) }}">Rubrics</a>
+                            </td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="9">No examinations yet.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <a href="{{ url_for('examination_form') }}">Add new exam</a>
+    </section>
+
+    <section id="examiners">
+        <h2>Examiners</h2>
+
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Name</th>
+                        <th>Contact details</th>
+                        <th>Department</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for examiner in examiners %}
+                        <tr>
+                            <td>{{ examiner['examiner_id'] }}</td>
+                            <td>{{ examiner['name'] }}</td>
+                            <td>{{ examiner['contact_details'] or '' }}</td>
+                            <td>{{ examiner['department'] or '' }}</td>
+                            <td>{{ examiner['status'] }}</td>
+                            <td>
+                                <a href="{{ url_for(
+                                    'review_examiner',
+                                    examiner_id=examiner['examiner_id']
+                                ) }}">
+                                    View / Approve
+                                </a>
+                            </td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="6">No examiners yet.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <form method="post" action="{{ url_for('logout') }}">
+        <button type="submit">Log out</button>
+    </form>
+</body>
+</html>
