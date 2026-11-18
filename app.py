@@ -750,3 +750,181 @@ def add_course():
         values=values,
         error=error
     )
+
+@app.route(
+    "/admin/examinations/new",
+    defaults={"exam_id": None},
+    methods=["GET", "POST"]
+)
+@app.route(
+    "/admin/examinations/<int:exam_id>/edit",
+    methods=["GET", "POST"]
+)
+@require_role("Admin")
+def examination_form(exam_id):
+    error = None
+    values = {
+        "course_code": "",
+        "exam_name": "",
+        "exam_type": "",
+        "duration": "",
+        "max_marks": ""
+    }
+
+    if (
+        request.method == "POST"
+        and request.form.get("action") == "cancel"
+    ):
+        return redirect(url_for("dashboard"))
+
+    with closing(sqlite3.connect(database_path)) as database:
+        database.execute("PRAGMA foreign_keys = ON")
+        database.row_factory = sqlite3.Row
+
+        if exam_id is not None:
+            examination = database.execute(
+                """
+                SELECT examination.*, course.course_code
+                FROM examination
+                JOIN course
+                    ON course.course_id = examination.course_id
+                WHERE examination.exam_id = ?
+                """,
+                (exam_id,)
+            ).fetchone()
+
+            if examination is None:
+                abort(404)
+
+            values = dict(examination)
+
+        if request.method == "POST":
+            values = {
+                "course_code": request.form.get(
+                    "course_code", ""
+                ).strip(),
+                "exam_name": request.form.get("exam_name", "").strip(),
+                "exam_type": request.form.get("exam_type", ""),
+                "duration": request.form.get("duration", ""),
+                "max_marks": request.form.get("max_marks", "")
+            }
+
+            try:
+                course_code = int(values["course_code"])
+                duration = int(values["duration"])
+                max_marks = int(values["max_marks"])
+
+                if duration < 0 or max_marks < 0:
+                    raise ValueError(
+                        "Duration and maximum marks cannot be negative."
+                    )
+
+                if not values["exam_name"]:
+                    raise ValueError("Examination name is required.")
+
+                if values["exam_type"] not in (
+                    "Viva", "Practical", "Project Demo", "Assessment"
+                ):
+                    raise ValueError("Choose a valid examination type.")
+
+                courses = database.execute(
+                    "SELECT course_id FROM course WHERE course_code = ?",
+                    (course_code,)
+                ).fetchall()
+
+                if len(courses) != 1:
+                    raise ValueError(
+                        "Course code must identify exactly one "
+                        "existing course."
+                    )
+
+                course_id = courses[0]["course_id"]
+
+                if exam_id is None:
+                    cursor = database.execute(
+                        """
+                        INSERT INTO examination (
+                            course_id, exam_name, exam_type,
+                            duration, max_marks, status
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            course_id,
+                            values["exam_name"],
+                            values["exam_type"],
+                            duration,
+                            max_marks,
+                            "Draft"
+                        )
+                    )
+
+                    saved_exam_id = cursor.lastrowid
+
+                else:
+                    database.execute(
+                        """
+                        UPDATE examination
+                        SET course_id = ?,
+                            exam_name = ?,
+                            exam_type = ?,
+                            duration = ?,
+                            max_marks = ?
+                        WHERE exam_id = ?
+                        """,
+                        (
+                            course_id,
+                            values["exam_name"],
+                            values["exam_type"],
+                            duration,
+                            max_marks,
+                            exam_id
+                        )
+                    )
+
+                    saved_exam_id = exam_id
+
+                database.commit()
+
+            except ValueError as exception:
+                error = str(exception)
+
+            except sqlite3.IntegrityError:
+                error = "The examination could not be saved."
+
+            else:
+                if request.form.get("action") == "slots":
+                    return redirect(
+                        url_for(
+                            "examination_slots",
+                            exam_id=saved_exam_id
+                        )
+                    )
+
+                return redirect(url_for("dashboard"))
+
+    return render_template(
+        "examination_form.html",
+        values=values,
+        error=error,
+        exam_id=exam_id
+    )
+
+@app.route("/admin/examinations/<int:exam_id>/slots")
+@require_role("Admin")
+def examination_slots(exam_id):
+    with closing(sqlite3.connect(database_path)) as database:
+        database.row_factory = sqlite3.Row
+
+        examination = database.execute(
+            "SELECT exam_id, exam_name FROM examination WHERE exam_id = ?",
+            (exam_id,)
+        ).fetchone()
+
+    if examination is None:
+        abort(404)
+
+    return render_template(
+        "examination_slots.html",
+        examination=examination
+    )

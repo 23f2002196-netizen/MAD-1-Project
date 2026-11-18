@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Examination slots</title>
+</head>
+<body>
+    <h1>Slots: {{ examination['exam_name'] }}</h1>
+
+    <a href="{{ url_for(
+        'examination_form',
+        exam_id=examination['exam_id']
+    ) }}">
+        Back to examination
+    </a>
+</body>
+</html>

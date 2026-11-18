@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Examination</title>
+</head>
+<body>
+    <h1>
+        {% if exam_id is not none %}
+            Edit examination
+        {% else %}
+            Add examination
+        {% endif %}
+    </h1>
+
+    {% if error %}
+        <p role="alert">{{ error }}</p>
+    {% endif %}
+
+    <form method="post">
+        <p>
+            <label for="course_code">Course code</label>
+            <input
+                id="course_code"
+                name="course_code"
+                type="number"
+                min="1000"
+                max="9999"
+                step="1"
+                value="{{ values['course_code'] }}"
+                required
+            >
+        </p>
+
+        <p>
+            <label for="exam_name">Name</label>
+            <input
+                id="exam_name"
+                name="exam_name"
+                type="text"
+                value="{{ values['exam_name'] }}"
+                required
+            >
+        </p>
+
+        <p>
+            <label for="exam_type">Type</label>
+            <select id="exam_type" name="exam_type" required>
+                <option value="">Choose a type</option>
+
+                {% for option in [
+                    'Viva', 'Practical', 'Project Demo', 'Assessment'
+                ] %}
+                    <option
+                        value="{{ option }}"
+                        {% if values['exam_type'] == option %}
+                            selected
+                        {% endif %}
+                    >
+                        {{ option }}
+                    </option>
+                {% endfor %}
+            </select>
+        </p>
+
+        <p>
+            <label for="duration">Duration (minutes)</label>
+            <input
+                id="duration"
+                name="duration"
+                type="number"
+                min="0"
+                step="1"
+                value="{{ values['duration'] }}"
+                required
+            >
+        </p>
+
+        <p>
+            <label for="max_marks">Maximum marks</label>
+            <input
+                id="max_marks"
+                name="max_marks"
+                type="number"
+                min="0"
+                step="1"
+                value="{{ values['max_marks'] }}"
+                required
+            >
+        </p>
+
+        <button type="submit" name="action" value="slots">
+            Add slots
+        </button>
+
+        <button type="submit" name="action" value="update">
+            Update
+        </button>
+
+        <button
+            type="submit"
+            name="action"
+            value="cancel"
+            formnovalidate
+        >
+            Cancel
+        </button>
+    </form>
+</body>
+</html>
