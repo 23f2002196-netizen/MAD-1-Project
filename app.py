@@ -94,28 +94,28 @@ with closing(sqlite3.connect(database_path)) as database:
                     AND max_marks >= 0
                 ),
 
-            slot_creation_start_date TEXT NOT NULL
+            slot_creation_start_date TEXT
                 CHECK (
                     length(slot_creation_start_date) = 10
                     AND date(slot_creation_start_date, '+0 days')
                         IS slot_creation_start_date
                 ),
 
-            slot_creation_end_date TEXT NOT NULL
+            slot_creation_end_date TEXT
                 CHECK (
                     length(slot_creation_end_date) = 10
                     AND date(slot_creation_end_date, '+0 days')
                         IS slot_creation_end_date
                 ),
 
-            slot_booking_start_date TEXT NOT NULL
+            slot_booking_start_date TEXT
                 CHECK (
                     length(slot_booking_start_date) = 10
                     AND date(slot_booking_start_date, '+0 days')
                         IS slot_booking_start_date
                 ),
 
-            slot_booking_end_date TEXT NOT NULL
+            slot_booking_end_date TEXT
                 CHECK (
                     length(slot_booking_end_date) = 10
                     AND date(slot_booking_end_date, '+0 days')
@@ -453,6 +453,17 @@ def admin_courses():
         database.row_factory = sqlite3.Row
 
         if request.method == "POST":
+            if request.form.get("action") == "cancel":
+                return redirect(url_for("dashboard"))
+
+            course_name = request.form.get("course_name", "").strip()
+            description = request.form.get("description", "").strip()
+            status = (
+                "Active"
+                if request.form.get("active") == "1"
+                else "Inactive"
+            )
+
             course_name = request.form.get("course_name", "").strip()
             description = request.form.get("description", "").strip()
             status = request.form.get("status", "").strip()
@@ -484,6 +495,7 @@ def admin_courses():
                     "be at most 200 characters and status at most 20."
                 )
 
+        
         courses = database.execute(
             "SELECT * FROM course ORDER BY course_id DESC"
         ).fetchall()

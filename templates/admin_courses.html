@@ -35,11 +35,17 @@
 
         <p>
             <label for="status">Status</label>
-            <input id="status" name="status"
-                   type="text" maxlength="20">
+            <input type="checkbox" name="active" value="1"
+                {% if request.form.get('active') == '1' %}checked{% endif %}> Active
         </p>
 
-        <button type="submit">Create course</button>
+        <button type="submit" name="action" value="update">
+            Update
+        </button>
+
+        <button type="submit" name="action" value="cancel" formnovalidate>
+            Cancel
+        </button>
     </form>
 
     <h2>Existing courses</h2>
