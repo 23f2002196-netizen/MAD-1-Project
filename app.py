@@ -1,5 +1,5 @@
 from contextlib import closing
-import getpass
+from getpass import getpass
 from pathlib import Path
 import sqlite3
 import re
@@ -273,6 +273,16 @@ with closing(sqlite3.connect(database_path)) as database:
             status TEXT
                 CHECK (length(status) <= 200)
         );
+    """)
+
+    database.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS student_user_unique
+        ON student(user_id)
+    """)
+
+    database.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS examiner_user_unique
+        ON examiner_profile(user_id)
     """)
 
     database.commit() 
@@ -648,3 +658,83 @@ def dashboard():
 def logout():
     session.clear()
     return redirect(url_for("home"))
+
+@app.route("/admin/courses/new", methods=["GET", "POST"])
+@require_role("Admin")
+def add_course():
+    error = None
+
+    values = {
+        "course_code": "",
+        "course_name": "",
+        "description": "",
+        "active": False
+    }
+
+    # Use the admin dashboard once that route exists.
+    destination = (
+        "admin_dashboard"
+        if "admin_dashboard" in app.view_functions
+        else "admin_courses"
+    )
+
+    if request.method == "POST":
+        # Cancel before reading, validating, or saving course details.
+        if request.form.get("action") == "cancel":
+            return redirect(url_for(destination))
+
+        values = {
+            "course_code": request.form.get("course_code", "").strip(),
+            "course_name": request.form.get("course_name", "").strip(),
+            "description": request.form.get("description", "").strip(),
+            "active": request.form.get("active") == "1"
+        }
+
+        status = "Active" if values["active"] else "Inactive"
+
+        try:
+            course_code = int(values["course_code"])
+
+        except ValueError:
+            error = "Course code must be a whole number."
+
+        else:
+            with closing(sqlite3.connect(database_path)) as database:
+                database.execute("PRAGMA foreign_keys = ON")
+
+                try:
+                    database.execute(
+                        """
+                        INSERT INTO course (
+                            course_code,
+                            course_name,
+                            description,
+                            status
+                        )
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (
+                            course_code,
+                            values["course_name"],
+                            values["description"],
+                            status
+                        )
+                    )
+                    database.commit()
+
+                except sqlite3.IntegrityError:
+                    error = (
+                        "Code must be 1000–9999. Name must be nonempty "
+                        "and contain only English letters, numbers, "
+                        "and spaces. Description must be at most "
+                        "200 characters."
+                    )
+
+                else:
+                    return redirect(url_for(destination))
+
+    return render_template(
+        "course_form.html",
+        values=values,
+        error=error
+    )
