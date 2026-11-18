@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Dashboard</title>
+</head>
+<body>
+    <h1>{{ g.user['role'] }} dashboard</h1>
+    <p>Signed in as {{ g.user['email'] }}</p>
+
+    {% if g.user['role'] == 'Admin' %}
+        <a href="{{ url_for('admin_courses') }}">Manage courses</a>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('logout') }}">
+        <button type="submit">Log out</button>
+    </form>
+</body>
+</html>

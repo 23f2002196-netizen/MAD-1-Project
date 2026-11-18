@@ -90,5 +90,26 @@
 
         <button type="submit">Register</button>
     </form>
+    <h2>Log in</h2>
+
+    <form method="post" action="{{ url_for('login') }}">
+        <p>
+            <label>
+                Email
+                <input type="email" name="email"
+                    autocomplete="username" required>
+            </label>
+        </p>
+
+        <p>
+            <label>
+                Password
+                <input type="password" name="password"
+                    autocomplete="current-password" required>
+            </label>
+        </p>
+
+        <button type="submit">Log in</button>
+    </form>
 </body>
 </html>

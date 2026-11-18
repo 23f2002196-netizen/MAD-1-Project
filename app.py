@@ -3,12 +3,24 @@ import getpass
 from pathlib import Path
 import sqlite3
 import re
+import os
+import secrets
+from functools import wraps
 
-from flask import Flask, redirect, render_template, request, url_for, request
-from werkzeug.security import generate_password_hash
+from flask import (
+    Flask, abort, g, redirect, render_template, request, session, url_for
+)
+
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 database_path = Path(__file__).parent / "examinationapp.db"
+
+app.config["SECRET_KEY"] = (
+    os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
+)
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 with closing(sqlite3.connect(database_path)) as database:
     database.execute("PRAGMA foreign_keys = ON")
@@ -265,100 +277,27 @@ with closing(sqlite3.connect(database_path)) as database:
 
     database.commit() 
 
+def account_is_enabled(database, user):
+    if user["role"] == "Admin":
+        return True
 
-@app.route("/admin/courses", methods=["GET", "POST"])
-def admin_courses():
-    error = None
-
-    with closing(sqlite3.connect(database_path)) as database:
-        database.execute("PRAGMA foreign_keys = ON")
-        database.row_factory = sqlite3.Row
-
-        if request.method == "POST":
-            course_name = request.form.get("course_name", "").strip()
-            description = request.form.get("description", "").strip()
-            status = request.form.get("status", "").strip()
-
-            try:
-                course_code = int(request.form.get("course_code", ""))
-
-                database.execute(
-                    """
-                    INSERT INTO course (
-                        course_code, course_name, description, status
-                    )
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (course_code, course_name, description, status)
-                )
-
-                database.commit()
-                return redirect(url_for("admin_courses"))
-
-            except ValueError:
-                error = "Enter a whole number for the course code."
-
-            except sqlite3.IntegrityError:
-                error = (
-                    "Check the course details: code must be 1000–9999; "
-                    "name must contain only English letters, numbers, "
-                    "and spaces and cannot be blank; description must "
-                    "be at most 200 characters and status at most 20."
-                )
-
-        courses = database.execute(
-            "SELECT * FROM course ORDER BY course_id DESC"
-        ).fetchall()
-
-    return render_template(
-        "admin_courses.html",
-        courses=courses,
-        error=error
-    )
-
-@app.cli.command("create-admin")
-def create_admin():
-    with closing(sqlite3.connect(database_path)) as database:
-        database.execute("PRAGMA foreign_keys = ON")
-
-        existing_admin = database.execute(
-            "SELECT user_id FROM users WHERE role = ?",
-            ("Admin",)
+    if user["role"] == "Student":
+        profile = database.execute(
+            "SELECT status FROM student WHERE user_id = ?",
+            (user["user_id"],)
         ).fetchone()
 
-        if existing_admin:
-            print("An admin already exists. No changes made.")
-            return
+        return profile is not None and profile["status"] == "Active"
 
-        email = input("Admin email: ").strip().lower()
-        password = getpass("Admin password: ")
-        confirmation = getpass("Confirm password: ")
+    if user["role"] == "Examiner":
+        profile = database.execute(
+            "SELECT status FROM examiner_profile WHERE user_id = ?",
+            (user["user_id"],)
+        ).fetchone()
 
-        if not email or not password:
-            print("Email and password are required.")
-            return
+        return profile is not None and profile["status"] == "Approved"
 
-        if password != confirmation:
-            print("Passwords do not match. No account created.")
-            return
-
-        password_hash = generate_password_hash(password)
-
-        try:
-            database.execute(
-                """
-                INSERT INTO users (email, password_hash, role)
-                VALUES (?, ?, ?)
-                """,
-                (email, password_hash, "Admin")
-            )
-            database.commit()
-
-        except sqlite3.IntegrityError:
-            print("Account creation failed. Check whether the email exists.")
-            return
-
-        print("Admin account created.")
+    return False
 
 def create_student(email, password, name, contact_details=""):
     return _create_account(
@@ -456,6 +395,139 @@ def _create_account(
 
     return user_id
 
+@app.before_request
+def load_logged_in_user():
+    g.user = None
+    user_id = session.get("user_id")
+
+    if user_id is None:
+        return
+
+    with closing(sqlite3.connect(database_path)) as database:
+        database.row_factory = sqlite3.Row
+
+        user = database.execute(
+            "SELECT * FROM users WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()
+
+        if user is None or not account_is_enabled(database, user):
+            session.clear()
+            return
+
+        g.user = user
+
+def require_role(*allowed_roles):
+    def decorate(view_function):
+        @wraps(view_function)
+        def wrapped_view(*args, **kwargs):
+            if g.user is None:
+                return redirect(url_for("home"))
+
+            if g.user["role"] not in allowed_roles:
+                abort(403)
+
+            return view_function(*args, **kwargs)
+
+        return wrapped_view
+
+    return decorate       
+
+@app.route("/admin/courses", methods=["GET", "POST"])
+@require_role("Admin")
+def admin_courses():
+    error = None
+
+    with closing(sqlite3.connect(database_path)) as database:
+        database.execute("PRAGMA foreign_keys = ON")
+        database.row_factory = sqlite3.Row
+
+        if request.method == "POST":
+            course_name = request.form.get("course_name", "").strip()
+            description = request.form.get("description", "").strip()
+            status = request.form.get("status", "").strip()
+
+            try:
+                course_code = int(request.form.get("course_code", ""))
+
+                database.execute(
+                    """
+                    INSERT INTO course (
+                        course_code, course_name, description, status
+                    )
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (course_code, course_name, description, status)
+                )
+
+                database.commit()
+                return redirect(url_for("admin_courses"))
+
+            except ValueError:
+                error = "Enter a whole number for the course code."
+
+            except sqlite3.IntegrityError:
+                error = (
+                    "Check the course details: code must be 1000–9999; "
+                    "name must contain only English letters, numbers, "
+                    "and spaces and cannot be blank; description must "
+                    "be at most 200 characters and status at most 20."
+                )
+
+        courses = database.execute(
+            "SELECT * FROM course ORDER BY course_id DESC"
+        ).fetchall()
+
+    return render_template(
+        "admin_courses.html",
+        courses=courses,
+        error=error
+    )
+
+@app.cli.command("create-admin")
+def create_admin():
+    with closing(sqlite3.connect(database_path)) as database:
+        database.execute("PRAGMA foreign_keys = ON")
+
+        existing_admin = database.execute(
+            "SELECT user_id FROM users WHERE role = ?",
+            ("Admin",)
+        ).fetchone()
+
+        if existing_admin:
+            print("An admin already exists. No changes made.")
+            return
+
+        email = input("Admin email: ").strip().lower()
+        password = getpass("Admin password: ")
+        confirmation = getpass("Confirm password: ")
+
+        if not email or not password:
+            print("Email and password are required.")
+            return
+
+        if password != confirmation:
+            print("Passwords do not match. No account created.")
+            return
+
+        password_hash = generate_password_hash(password)
+
+        try:
+            database.execute(
+                """
+                INSERT INTO users (email, password_hash, role)
+                VALUES (?, ?, ?)
+                """,
+                (email, password_hash, "Admin")
+            )
+            database.commit()
+
+        except sqlite3.IntegrityError:
+            print("Account creation failed. Check whether the email exists.")
+            return
+
+        print("Admin account created.")
+
 @app.route("/", methods=["GET", "POST"])
 def home():
     error = None
@@ -524,3 +596,55 @@ def home():
         values=values,
         created=request.args.get("created") == "1"
     )
+
+@app.route("/login", methods=["POST"])
+def login():
+    email = request.form.get("email", "").strip().lower()
+    password = request.form.get("password", "")
+
+    with closing(sqlite3.connect(database_path)) as database:
+        database.row_factory = sqlite3.Row
+
+        user = database.execute(
+            "SELECT * FROM users WHERE email = ?",
+            (email,)
+        ).fetchone()
+
+        if (
+            user is None
+            or not password
+            or not check_password_hash(user["password_hash"], password)
+        ):
+            return render_template(
+                "index.html",
+                error="Invalid email or password.",
+                values={},
+                created=False
+            ), 401
+
+        if not account_is_enabled(database, user):
+            return render_template(
+                "index.html",
+                error=(
+                    "This account is awaiting approval or is inactive. "
+                    "Contact the admin."
+                ),
+                values={},
+                created=False
+            ), 403
+
+        session.clear()
+        session["user_id"] = user["user_id"]
+
+    return redirect(url_for("dashboard"))
+
+@app.route("/dashboard")
+@require_role("Admin", "Examiner", "Student")
+def dashboard():
+    return render_template("dashboard.html")
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return redirect(url_for("home"))
