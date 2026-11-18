@@ -961,28 +961,15 @@ def examination_form(exam_id):
     )
 
 @app.route(
+    "/admin/examinations/<int:exam_id>/slots/<int:slot_id>/edit",
+    methods=["GET", "POST"]
+)
+
+@app.route(
     "/admin/examinations/<int:exam_id>/slots",
     defaults={"slot_id": None},
     methods=["GET", "POST"]
 )
-@require_role("Admin")
-def examination_slots(exam_id):
-    with closing(sqlite3.connect(database_path)) as database:
-        database.row_factory = sqlite3.Row
-
-        examination = database.execute(
-            "SELECT exam_id, exam_name FROM examination WHERE exam_id = ?",
-            (exam_id,)
-        ).fetchone()
-
-    if examination is None:
-        abort(404)
-
-    return render_template(
-        "examination_slots.html",
-        examination=examination
-    )
-
 @app.route(
     "/admin/examinations/<int:exam_id>/slots/<int:slot_id>/edit",
     methods=["GET", "POST"]
