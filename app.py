@@ -852,15 +852,48 @@ def add_course(course_id):
         error=error
     )
 
+def validate_booking_window(start_text, end_text, status):
+    allowed_statuses = (
+        "Draft", "Slot Creation", "Booking Open", "Closed", "Completed"
+    )
+
+    if status not in allowed_statuses:
+        raise ValueError("Choose a valid examination status.")
+
+    if bool(start_text) != bool(end_text):
+        raise ValueError("Enter both booking dates, or leave both empty.")
+
+    if not start_text:
+        if status == "Booking Open":
+            raise ValueError(
+                "Set both booking dates before opening booking."
+            )
+        return None, None
+
+    try:
+        start = date.fromisoformat(start_text)
+        end = date.fromisoformat(end_text)
+    except ValueError:
+        raise ValueError("Enter valid booking dates.")
+
+    if end <= start:
+        raise ValueError(
+            "Booking end date must be after the start date."
+        )
+
+    return start.isoformat(), end.isoformat()
+
 @app.route(
     "/admin/examinations/new",
     defaults={"exam_id": None},
     methods=["GET", "POST"]
 )
+
 @app.route(
     "/admin/examinations/<int:exam_id>/edit",
     methods=["GET", "POST"]
 )
+
 @require_role("Admin")
 def examination_form(exam_id):
     error = None
@@ -875,13 +908,17 @@ def examination_form(exam_id):
         "exam_name": "",
         "exam_type": "",
         "duration": "",
-        "max_marks": ""
+        "max_marks": "",
+        "slot_booking_start_date": "",
+        "slot_booking_end_date": "",
+        "status": "Draft"
     }
+
     if (
         request.method == "POST"
         and request.form.get("action") == "cancel"
     ):
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("admin_dashboard"))
 
     with closing(sqlite3.connect(database_path)) as database:
         database.execute("PRAGMA foreign_keys = ON")
@@ -890,11 +927,10 @@ def examination_form(exam_id):
         if exam_id is not None:
             examination = database.execute(
                 """
-                SELECT examination.*, course.course_code
-                FROM examination
-                JOIN course
-                    ON course.course_id = examination.course_id
-                WHERE examination.exam_id = ?
+                SELECT e.*, c.course_code
+                FROM examination e
+                JOIN course c ON c.course_id = e.course_id
+                WHERE e.exam_id = ?
                 """,
                 (exam_id,)
             ).fetchone()
@@ -904,7 +940,37 @@ def examination_form(exam_id):
 
             values = dict(examination)
 
-        if request.method == "POST":
+        if (
+            request.method == "POST"
+            and request.form.get("action") == "delete"
+        ):
+            if exam_id is None:
+                abort(400)
+
+            try:
+                database.execute(
+                    "DELETE FROM examination WHERE exam_id = ?",
+                    (exam_id,)
+                )
+                database.commit()
+
+            except sqlite3.IntegrityError:
+                database.rollback()
+                delete_mode = True
+                error = (
+                    "This examination has related records "
+                    "and cannot be deleted."
+                )
+
+            else:
+                return redirect(url_for("admin_dashboard"))
+
+        elif request.method == "POST":
+            action = request.form.get("action")
+
+            if action not in ("update", "slots"):
+                abort(400)
+
             values = {
                 "course_code": request.form.get(
                     "course_code", ""
@@ -912,13 +978,26 @@ def examination_form(exam_id):
                 "exam_name": request.form.get("exam_name", "").strip(),
                 "exam_type": request.form.get("exam_type", ""),
                 "duration": request.form.get("duration", ""),
-                "max_marks": request.form.get("max_marks", "")
+                "max_marks": request.form.get("max_marks", ""),
+                "slot_booking_start_date": request.form.get(
+                    "slot_booking_start_date", ""
+                ).strip(),
+                "slot_booking_end_date": request.form.get(
+                    "slot_booking_end_date", ""
+                ).strip(),
+                "status": request.form.get("status", "")
             }
 
             try:
-                course_code = int(values["course_code"])
-                duration = int(values["duration"])
-                max_marks = int(values["max_marks"])
+                try:
+                    course_code = int(values["course_code"])
+                    duration = int(values["duration"])
+                    max_marks = int(values["max_marks"])
+                except ValueError:
+                    raise ValueError(
+                        "Course code, duration and maximum marks "
+                        "must be whole numbers."
+                    )
 
                 if duration < 0 or max_marks < 0:
                     raise ValueError(
@@ -933,6 +1012,12 @@ def examination_form(exam_id):
                 ):
                     raise ValueError("Choose a valid examination type.")
 
+                booking_start, booking_end = validate_booking_window(
+                    values["slot_booking_start_date"],
+                    values["slot_booking_end_date"],
+                    values["status"]
+                )
+
                 courses = database.execute(
                     "SELECT course_id FROM course WHERE course_code = ?",
                     (course_code,)
@@ -944,25 +1029,28 @@ def examination_form(exam_id):
                         "existing course."
                     )
 
-                course_id = courses[0]["course_id"]
+                fields = (
+                    courses[0]["course_id"],
+                    values["exam_name"],
+                    values["exam_type"],
+                    duration,
+                    max_marks,
+                    booking_start,
+                    booking_end,
+                    values["status"]
+                )
 
                 if exam_id is None:
                     cursor = database.execute(
                         """
                         INSERT INTO examination (
-                            course_id, exam_name, exam_type,
-                            duration, max_marks, status
+                            course_id, exam_name, exam_type, duration,
+                            max_marks, slot_booking_start_date,
+                            slot_booking_end_date, status
                         )
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                        (
-                            course_id,
-                            values["exam_name"],
-                            values["exam_type"],
-                            duration,
-                            max_marks,
-                            "Draft"
-                        )
+                        fields
                     )
 
                     saved_exam_id = cursor.lastrowid
@@ -975,17 +1063,13 @@ def examination_form(exam_id):
                             exam_name = ?,
                             exam_type = ?,
                             duration = ?,
-                            max_marks = ?
+                            max_marks = ?,
+                            slot_booking_start_date = ?,
+                            slot_booking_end_date = ?,
+                            status = ?
                         WHERE exam_id = ?
                         """,
-                        (
-                            course_id,
-                            values["exam_name"],
-                            values["exam_type"],
-                            duration,
-                            max_marks,
-                            exam_id
-                        )
+                        fields + (exam_id,)
                     )
 
                     saved_exam_id = exam_id
@@ -996,10 +1080,11 @@ def examination_form(exam_id):
                 error = str(exception)
 
             except sqlite3.IntegrityError:
+                database.rollback()
                 error = "The examination could not be saved."
 
             else:
-                if request.form.get("action") == "slots":
+                if action == "slots":
                     return redirect(
                         url_for(
                             "examination_slots",
@@ -1007,37 +1092,7 @@ def examination_form(exam_id):
                         )
                     )
 
-                return redirect(url_for("dashboard"))
-
-        if (
-            request.method == "POST"
-            and request.form.get("action") == "delete"
-            ):
-            if exam_id is None:
-                abort(400)
-
-            try:
-                database.execute(
-                    "DELETE FROM examination WHERE exam_id = ?",
-                    (exam_id,)
-                )
-                database.commit()
-
-            except sqlite3.IntegrityError:
-                database.rollback()
-
-                return render_template(
-                    "examination_form.html",
-                    values=values,
-                    error=(
-                        "This examination has related records "
-                        "and cannot be deleted."
-                    ),
-                    exam_id=exam_id,
-                    delete_mode=True
-                )
-
-        return redirect(url_for("admin_dashboard"))
+                return redirect(url_for("admin_dashboard"))
 
     return render_template(
         "examination_form.html",

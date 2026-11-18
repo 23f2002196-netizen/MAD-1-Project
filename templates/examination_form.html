@@ -101,6 +101,63 @@
                 required
             >
         </p>
+        <fieldset {% if delete_mode %}disabled{% endif %}>
+            <legend>Booking settings</legend>
+
+            <p>
+                <label for="slot_booking_start_date">
+                    Booking start date
+                </label>
+
+                <input
+                    id="slot_booking_start_date"
+                    name="slot_booking_start_date"
+                    type="date"
+                    value="{{ values.get('slot_booking_start_date') or '' }}"
+                >
+            </p>
+
+            <p>
+                <label for="slot_booking_end_date">
+                    Booking end date
+                </label>
+
+                <input
+                    id="slot_booking_end_date"
+                    name="slot_booking_end_date"
+                    type="date"
+                    value="{{ values.get('slot_booking_end_date') or '' }}"
+                >
+            </p>
+
+            <p>
+                <label for="exam_status">Examination status</label>
+
+                <select id="exam_status" name="status" required>
+                    {% for value, label in [
+                        ('Draft', 'Draft'),
+                        ('Slot Creation', 'Slot creation'),
+                        ('Booking Open', 'Open booking'),
+                        ('Closed', 'Close booking'),
+                        ('Completed', 'Completed')
+                    ] %}
+                        <option
+                            value="{{ value }}"
+                            {% if values.get('status', 'Draft') == value %}
+                                selected
+                            {% endif %}
+                        >
+                            {{ label }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </p>
+
+            <p>
+                Both dates are required to open booking.
+                The end date must be after the start date.
+            </p>
+        </fieldset>
 
         {% if delete_mode %}
             <button type="submit" name="action" value="delete"
