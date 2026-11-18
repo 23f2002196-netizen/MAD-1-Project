@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Examination details</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 24px;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 16px 0;
+        }
+
+        th, td {
+            border: 1px solid #ccc;
+            padding: 8px;
+            text-align: left;
+        }
+
+        th {
+            background: #f2f2f2;
+        }
+    </style>
+</head>
+<body>
+    <h1>{{ examination['exam_name'] }}</h1>
+
+    <h2>Examination details</h2>
+
+    <table>
+        <tbody>
+            <tr>
+                <th>Exam ID</th>
+                <td>{{ examination['exam_id'] }}</td>
+            </tr>
+            <tr>
+                <th>Type</th>
+                <td>{{ examination['exam_type'] }}</td>
+            </tr>
+            <tr>
+                <th>Duration</th>
+                <td>{{ examination['duration'] }} minutes</td>
+            </tr>
+            <tr>
+                <th>Maximum marks</th>
+                <td>{{ examination['max_marks'] }}</td>
+            </tr>
+            <tr>
+                <th>Status</th>
+                <td>{{ examination['status'] or 'Not set' }}</td>
+            </tr>
+            <tr>
+                <th>Booking opens</th>
+                <td>
+                    {{ examination['slot_booking_start_date']
+                       or 'Not set' }}
+                </td>
+            </tr>
+            <tr>
+                <th>Booking closes</th>
+                <td>
+                    {{ examination['slot_booking_end_date']
+                       or 'Not set' }}
+                </td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>Course details</h2>
+
+    <p>Course ID: {{ examination['course_id'] }}</p>
+    <p>Course code: {{ examination['course_code'] }}</p>
+    <p>Course name: {{ examination['course_name'] }}</p>
+
+    <p>
+        {{ examination['course_description']
+           or 'No description provided.' }}
+    </p>
+
+    <h2>Your booked slots</h2>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Slot ID</th>
+                <th>Date</th>
+                <th>Start time</th>
+                <th>End time</th>
+                <th>Examiner</th>
+                <th>Booking status</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            {% for slot in booked_slots %}
+                <tr>
+                    <td>{{ slot['slot_id'] }}</td>
+                    <td>{{ slot['slot_date'] }}</td>
+                    <td>{{ slot['start_time'] }}</td>
+                    <td>{{ slot['end_time'] }}</td>
+                    <td>
+                        {{ slot['examiner_name'] or 'Unassigned' }}
+                    </td>
+                    <td>{{ slot['booking_status'] }}</td>
+                </tr>
+            {% else %}
+                <tr>
+                    <td colspan="6">
+                        You have no active or completed booking
+                        for this examination.
+                    </td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <a href="{{ url_for('student_dashboard') }}">
+        Back to dashboard
+    </a>
+</body>
+</html>

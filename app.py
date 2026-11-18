@@ -2713,3 +2713,65 @@ def student_history():
         student=student,
         history=history
     )
+
+@app.route("/student/examinations/<int:exam_id>")
+@require_role("Student")
+def student_exam_details(exam_id):
+    with closing(sqlite3.connect(database_path)) as database:
+        database.row_factory = sqlite3.Row
+
+        student = database.execute(
+            """
+            SELECT student_id
+            FROM student
+            WHERE user_id = ?
+            """,
+            (g.user["user_id"],)
+        ).fetchone()
+
+        if student is None:
+            abort(403)
+
+        examination = database.execute(
+            """
+            SELECT
+                e.*,
+                c.course_code,
+                c.course_name,
+                c.description AS course_description
+            FROM examination e
+            JOIN course c ON c.course_id = e.course_id
+            WHERE e.exam_id = ?
+            """,
+            (exam_id,)
+        ).fetchone()
+
+        if examination is None:
+            abort(404)
+
+        booked_slots = database.execute(
+            """
+            SELECT
+                s.slot_id,
+                s.slot_date,
+                s.start_time,
+                s.end_time,
+                b.status AS booking_status,
+                ep.name AS examiner_name
+            FROM booking b
+            JOIN examination_slot s ON s.slot_id = b.slot_id
+            LEFT JOIN examiner_profile ep
+                ON ep.examiner_id = s.examiner_id
+            WHERE b.student_id = ?
+              AND s.exam_id = ?
+              AND b.status IN ('Booked', 'Completed')
+            ORDER BY s.slot_date, s.start_time
+            """,
+            (student["student_id"], exam_id)
+        ).fetchall()
+
+    return render_template(
+        "student_exam_details.html",
+        examination=examination,
+        booked_slots=booked_slots
+    )
