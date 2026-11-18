@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Examiner dashboard</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 24px;
+        }
+
+        nav a {
+            margin-right: 16px;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 16px 0;
+        }
+
+        th, td {
+            border: 1px solid #ccc;
+            padding: 8px;
+            text-align: left;
+        }
+
+        th {
+            background: #f2f2f2;
+        }
+
+        section {
+            margin-top: 32px;
+        }
+
+        .table-container {
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Examiner dashboard</h1>
+
+    <p>
+        {{ examiner['name'] }}
+        — Examiner ID {{ examiner['examiner_id'] }}
+    </p>
+
+    <nav>
+        <a href="{{ url_for('examiner_dashboard', section='exams') }}">
+            Exams
+        </a>
+
+        <a href="{{ url_for('examiner_dashboard', section='slots') }}">
+            Slots
+        </a>
+    </nav>
+
+    <p>Pending evaluations: {{ pending_evaluations }}</p>
+
+    {% if section in ('all', 'exams') %}
+        <section>
+            <h2>Assigned examinations</h2>
+
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Course ID</th>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Duration</th>
+                            <th>Maximum marks</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        {% for exam in examinations %}
+                            <tr>
+                                <td>{{ exam['exam_id'] }}</td>
+                                <td>{{ exam['course_id'] }}</td>
+                                <td>{{ exam['exam_name'] }}</td>
+                                <td>{{ exam['exam_type'] }}</td>
+                                <td>{{ exam['duration'] }} minutes</td>
+                                <td>{{ exam['max_marks'] }}</td>
+
+                                <td>
+                                    <a href="{{ url_for(
+                                        'examiner_availability',
+                                        exam_id=exam['exam_id']
+                                    ) }}">
+                                        Fill availability
+                                    </a>
+                                </td>
+                            </tr>
+                        {% else %}
+                            <tr>
+                                <td colspan="7">
+                                    No examinations assigned yet.
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    {% endif %}
+
+    {% if section in ('all', 'slots') %}
+        <section>
+            <h2>Booked slots</h2>
+
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Exam ID</th>
+                            <th>Slot ID</th>
+                            <th>Student ID</th>
+                            <th>Booking date</th>
+                            <th>Status</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        {% for booking in bookings %}
+                            <tr>
+                                <td>{{ booking['exam_id'] }}</td>
+                                <td>{{ booking['slot_id'] }}</td>
+                                <td>{{ booking['student_id'] }}</td>
+                                <td>{{ booking['booking_date'] }}</td>
+                                <td>{{ booking['status'] }}</td>
+
+                                <td>
+                                    {% if booking['status'] in
+                                        ('Booked', 'Completed') %}
+                                        <a href="{{ url_for(
+                                            'examiner_evaluation',
+                                            booking_id=booking['booking_id']
+                                        ) }}">
+                                            Rubric
+                                        </a>
+                                    {% else %}
+                                        Not available
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% else %}
+                            <tr>
+                                <td colspan="6">
+                                    No students have booked your slots.
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('logout') }}">
+        <button type="submit">Log out</button>
+    </form>
+</body>
+</html>

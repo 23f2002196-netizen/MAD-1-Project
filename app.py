@@ -659,6 +659,9 @@ def dashboard():
     if g.user["role"] == "Admin":
         return redirect(url_for("admin_dashboard"))
 
+    if g.user["role"] == "Examiner":
+        return redirect(url_for("examiner_dashboard"))
+
     return render_template("dashboard.html")
 
 @app.route("/logout", methods=["POST"])
@@ -1830,6 +1833,7 @@ def examiner_availability():
 )
 @require_role("Examiner")
 def examiner_evaluation(booking_id):
+
     if (
         request.method == "POST"
         and request.form.get("action") == "cancel"
@@ -2056,3 +2060,82 @@ def examiner_evaluation(booking_id):
         error=error,
         message=message
     )
+
+@app.route("/examiner/dashboard")
+@require_role("Examiner")
+def examiner_dashboard():
+    section = request.args.get("section", "all")
+
+    if section not in ("all", "exams", "slots"):
+        abort(400)
+
+    with closing(sqlite3.connect(database_path)) as database:
+        database.row_factory = sqlite3.Row
+
+        examiner = database.execute(
+            """
+            SELECT examiner_id, name
+            FROM examiner_profile
+            WHERE user_id = ?
+            """,
+            (g.user["user_id"],)
+        ).fetchone()
+
+        if examiner is None:
+            abort(403)
+
+        examiner_id = examiner["examiner_id"]
+
+        examinations = database.execute(
+            """
+            SELECT examination.*
+            FROM examination
+            WHERE EXISTS (
+                SELECT 1
+                FROM examination_slot
+                WHERE examination_slot.exam_id = examination.exam_id
+                  AND examination_slot.examiner_id = ?
+            )
+            ORDER BY examination.exam_id
+            """,
+            (examiner_id,)
+        ).fetchall()
+
+        bookings = database.execute(
+            """
+            SELECT
+                booking.booking_id,
+                examination_slot.exam_id,
+                booking.slot_id,
+                booking.student_id,
+                booking.booking_date,
+                booking.status,
+                evaluation.status AS evaluation_status
+            FROM booking
+            JOIN examination_slot
+                ON examination_slot.slot_id = booking.slot_id
+            LEFT JOIN evaluation
+                ON evaluation.booking_id = booking.booking_id
+            WHERE examination_slot.examiner_id = ?
+            ORDER BY examination_slot.slot_date,
+                     examination_slot.start_time,
+                     booking.booking_id
+            """,
+            (examiner_id,)
+        ).fetchall()
+
+    pending_evaluations = sum(
+        1 for booking in bookings
+        if booking["status"] in ("Booked", "Completed")
+        and booking["evaluation_status"] != "Submitted"
+    )
+
+    return render_template(
+        "examiner_dashboard.html",
+        examiner=examiner,
+        examinations=examinations,
+        bookings=bookings,
+        pending_evaluations=pending_evaluations,
+        section=section
+    )
+
