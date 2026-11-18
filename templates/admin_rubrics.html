@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Manage rubrics</title>
+</head>
+<body>
+    <h1>
+        {% if rubric_id is not none %}
+            Edit rubric criterion
+        {% else %}
+            Add rubric criterion
+        {% endif %}
+    </h1>
+
+    <p>{{ examination['exam_name'] }}</p>
+
+    {% if error %}
+        <p role="alert">{{ error }}</p>
+    {% endif %}
+
+    <form method="post">
+        <p>
+            <label for="exam_id">Exam ID</label>
+            <input id="exam_id" type="number"
+                   value="{{ examination['exam_id'] }}" readonly>
+        </p>
+
+        <p>
+            <label for="criterion_name">Criterion name</label>
+            <input id="criterion_name" name="criterion_name"
+                   type="text" maxlength="100"
+                   value="{{ values['criterion_name'] }}" required>
+        </p>
+
+        <p>
+            <label for="max_marks">Maximum marks</label>
+            <input id="max_marks" name="max_marks"
+                   type="number" min="0" step="any"
+                   value="{{ values['max_marks'] }}" required>
+        </p>
+
+        <p>
+            <label for="weightage">Weightage</label>
+            <input id="weightage" name="weightage"
+                   type="number" step="any"
+                   value="{{ values['weightage'] }}" required>
+        </p>
+
+        <p>
+            <label for="description">Description</label>
+            <textarea id="description" name="description"
+                      maxlength="200" rows="4"
+            >{{ values['description'] }}</textarea>
+        </p>
+
+        <button type="submit" name="action" value="update">
+            Update
+        </button>
+
+        <button type="submit" name="action" value="cancel"
+                formnovalidate>
+            Cancel
+        </button>
+    </form>
+
+    <h2>Existing criteria</h2>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Criterion</th>
+                <th>Maximum marks</th>
+                <th>Weightage</th>
+                <th>Description</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for rubric in rubrics %}
+                <tr>
+                    <td>{{ rubric['criterion_name'] }}</td>
+                    <td>{{ rubric['max_marks'] }}</td>
+                    <td>{{ rubric['weightage'] }}</td>
+                    <td>{{ rubric['description'] }}</td>
+                    <td>
+                        <a href="{{ url_for(
+                            'admin_rubrics',
+                            exam_id=examination['exam_id'],
+                            rubric_id=rubric['rubric_id']
+                        ) }}">
+                            Edit
+                        </a>
+                    </td>
+                </tr>
+            {% else %}
+                <tr>
+                    <td colspan="5">No criteria yet.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <p>
+        <a href="{{ url_for(
+            'admin_rubrics',
+            exam_id=examination['exam_id']
+        ) }}">
+            Add another criterion
+        </a>
+    </p>
+</body>
+</html>

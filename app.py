@@ -11,6 +11,7 @@ from flask import (
     Flask, abort, g, redirect, render_template, request, session, url_for
 )
 from werkzeug.security import generate_password_hash, check_password_hash
+import math
 
 app = Flask(__name__)
 database_path = Path(__file__).parent / "examinationapp.db"
@@ -1127,5 +1128,159 @@ def examination_slots(exam_id, slot_id):
         slots=slots,
         slot_id=slot_id,
         allowed_statuses=allowed_statuses,
+        error=error
+    )
+
+@app.route(
+    "/admin/examinations/<int:exam_id>/rubrics",
+    defaults={"rubric_id": None},
+    methods=["GET", "POST"]
+)
+@app.route(
+    "/admin/examinations/<int:exam_id>/rubrics/<int:rubric_id>/edit",
+    methods=["GET", "POST"]
+)
+@require_role("Admin")
+def admin_rubrics(exam_id, rubric_id):
+    error = None
+    values = {
+        "criterion_name": "",
+        "max_marks": "",
+        "weightage": "",
+        "description": ""
+    }
+
+    if (
+        request.method == "POST"
+        and request.form.get("action") == "cancel"
+    ):
+        return redirect(url_for("dashboard"))
+
+    with closing(sqlite3.connect(database_path)) as database:
+        database.execute("PRAGMA foreign_keys = ON")
+        database.row_factory = sqlite3.Row
+
+        examination = database.execute(
+            "SELECT exam_id, exam_name FROM examination WHERE exam_id = ?",
+            (exam_id,)
+        ).fetchone()
+
+        if examination is None:
+            abort(404)
+
+        if rubric_id is not None:
+            rubric = database.execute(
+                """
+                SELECT * FROM examination_rubric
+                WHERE rubric_id = ? AND exam_id = ?
+                """,
+                (rubric_id, exam_id)
+            ).fetchone()
+
+            if rubric is None:
+                abort(404)
+
+            values = dict(rubric)
+
+        if request.method == "POST":
+            values = {
+                "criterion_name": request.form.get(
+                    "criterion_name", ""
+                ).strip(),
+                "max_marks": request.form.get("max_marks", ""),
+                "weightage": request.form.get("weightage", ""),
+                "description": request.form.get(
+                    "description", ""
+                ).strip()
+            }
+
+            try:
+                max_marks = float(values["max_marks"])
+                weightage = float(values["weightage"])
+
+                if not math.isfinite(max_marks) or not math.isfinite(weightage):
+                    raise ValueError(
+                        "Maximum marks and weightage must be finite numbers."
+                    )
+
+                if max_marks < 0:
+                    raise ValueError("Maximum marks cannot be negative.")
+
+                if not 1 <= len(values["criterion_name"]) <= 100:
+                    raise ValueError(
+                        "Criterion name must contain 1 to 100 characters."
+                    )
+
+                if len(values["description"]) > 200:
+                    raise ValueError(
+                        "Description must be at most 200 characters."
+                    )
+
+                if rubric_id is None:
+                    database.execute(
+                        """
+                        INSERT INTO examination_rubric (
+                            exam_id, criterion_name,
+                            max_marks, weightage, description
+                        )
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (
+                            exam_id,
+                            values["criterion_name"],
+                            max_marks,
+                            weightage,
+                            values["description"]
+                        )
+                    )
+
+                else:
+                    database.execute(
+                        """
+                        UPDATE examination_rubric
+                        SET criterion_name = ?,
+                            max_marks = ?,
+                            weightage = ?,
+                            description = ?
+                        WHERE rubric_id = ? AND exam_id = ?
+                        """,
+                        (
+                            values["criterion_name"],
+                            max_marks,
+                            weightage,
+                            values["description"],
+                            rubric_id,
+                            exam_id
+                        )
+                    )
+
+                database.commit()
+
+            except ValueError as exception:
+                error = str(exception)
+
+            except sqlite3.IntegrityError:
+                error = "The rubric criterion could not be saved."
+
+            else:
+                return redirect(
+                    url_for("admin_rubrics", exam_id=exam_id)
+                )
+
+        rubrics = database.execute(
+            """
+            SELECT * FROM examination_rubric
+            WHERE exam_id = ?
+            ORDER BY rubric_id
+            """,
+            (exam_id,)
+        ).fetchall()
+
+    return render_template(
+        "admin_rubrics.html",
+        examination=examination,
+        rubric_id=rubric_id,
+        values=values,
+        rubrics=rubrics,
         error=error
     )

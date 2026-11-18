@@ -18,6 +18,12 @@
         <p role="alert">{{ error }}</p>
     {% endif %}
 
+    {% if exam_id is not none %}
+        <a href="{{ url_for('admin_rubrics', exam_id=exam_id) }}">
+            Manage rubrics
+        </a>
+    {% endif %}
+    
     <form method="post">
         <p>
             <label for="course_code">Course code</label>
