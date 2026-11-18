@@ -6,7 +6,7 @@ import re
 import os
 import secrets
 from functools import wraps
-from datetime import date, time
+from datetime import date, time, datetime
 from flask import (
     Flask, abort, g, redirect, render_template, request, session, url_for
 )
@@ -662,7 +662,7 @@ def dashboard():
     if g.user["role"] == "Examiner":
         return redirect(url_for("examiner_dashboard"))
 
-    return render_template("dashboard.html")
+    return redirect(url_for("student_dashboard"))
 
 @app.route("/logout", methods=["POST"])
 def logout():
@@ -2164,3 +2164,447 @@ def examiner_dashboard():
         section=section
     )
 
+@app.route("/student/dashboard")
+@require_role("Student")
+def student_dashboard():
+    section = request.args.get("section", "home")
+
+    if section not in ("home", "exams", "slots"):
+        abort(400)
+
+    now = datetime.now()
+    today = now.date().isoformat()
+
+    with closing(sqlite3.connect(database_path)) as database:
+        database.row_factory = sqlite3.Row
+
+        student = database.execute(
+            "SELECT * FROM student WHERE user_id = ?",
+            (g.user["user_id"],)
+        ).fetchone()
+
+        if student is None:
+            abort(403)
+
+        bookings = database.execute(
+            """
+            SELECT
+                booking.*,
+                examination_slot.exam_id,
+                examination_slot.slot_date,
+                examination_slot.start_time,
+                examination.course_id,
+                examination.exam_name,
+                examination.exam_type,
+                examination.duration,
+                examination.max_marks
+            FROM booking
+            JOIN examination_slot
+                ON examination_slot.slot_id = booking.slot_id
+            JOIN examination
+                ON examination.exam_id = examination_slot.exam_id
+            WHERE booking.student_id = ?
+            ORDER BY examination_slot.slot_date,
+                     examination_slot.start_time
+            """,
+            (student["student_id"],)
+        ).fetchall()
+
+        booked_by_slot = {
+            booking["slot_id"]: booking
+            for booking in bookings
+            if booking["status"] == "Booked"
+        }
+
+        booked_exam_ids = {
+            booking["exam_id"]
+            for booking in bookings
+            if booking["status"] in ("Booked", "Completed")
+        }
+
+        rows = database.execute(
+            """
+            SELECT
+                s.*,
+                e.status AS exam_status,
+                e.slot_booking_start_date,
+                e.slot_booking_end_date,
+                c.status AS course_status,
+                ep.status AS examiner_status,
+                u.role AS examiner_role,
+                (
+                    SELECT COUNT(*)
+                    FROM booking b
+                    WHERE b.slot_id = s.slot_id
+                      AND b.status IN ('Booked', 'Completed')
+                ) AS occupied
+            FROM examination_slot s
+            JOIN examination e ON e.exam_id = s.exam_id
+            JOIN course c ON c.course_id = e.course_id
+            LEFT JOIN examiner_profile ep
+                ON ep.examiner_id = s.examiner_id
+            LEFT JOIN users u ON u.user_id = ep.user_id
+            WHERE s.slot_date >= ?
+              AND s.status IN ('Available', 'Full')
+            ORDER BY s.slot_date, s.start_time
+            """,
+            (today,)
+        ).fetchall()
+
+    slots = []
+
+    for row in rows:
+        slot = dict(row)
+
+        starts_at = datetime.fromisoformat(
+            slot["slot_date"] + "T" + slot["start_time"]
+        )
+
+        if starts_at <= now:
+            continue
+
+        slot["remaining"] = max(
+            0, slot["max_student_capacity"] - slot["occupied"]
+        )
+
+        own_booking = booked_by_slot.get(slot["slot_id"])
+        slot["booking_id"] = (
+            own_booking["booking_id"] if own_booking else None
+        )
+
+        booking_start = slot["slot_booking_start_date"]
+        booking_end = slot["slot_booking_end_date"]
+
+        period_open = bool(
+            booking_start
+            and booking_end
+            and booking_start <= today <= booking_end
+        )
+
+        slot["can_book"] = (
+            own_booking is None
+            and slot["exam_id"] not in booked_exam_ids
+            and slot["status"] == "Available"
+            and slot["remaining"] > 0
+            and slot["course_status"] == "Active"
+            and slot["exam_status"] == "Booking Open"
+            and period_open
+            and slot["examiner_id"] is not None
+            and slot["examiner_status"] == "Approved"
+            and slot["examiner_role"] == "Examiner"
+        )
+
+        slot["can_cancel"] = bool(
+            own_booking
+            and booking_end
+            and today <= booking_end
+        )
+
+        slots.append(slot)
+
+    upcoming = [
+        booking
+        for booking in bookings
+        if booking["status"] == "Booked"
+        and datetime.fromisoformat(
+            booking["slot_date"] + "T" + booking["start_time"]
+        ) > now
+    ]
+
+    return render_template(
+        "student_dashboard.html",
+        student=student,
+        slots=slots,
+        upcoming=upcoming,
+        section=section,
+        endpoints=set(app.view_functions)
+    )
+
+@app.route("/student/profile", methods=["GET", "POST"])
+@require_role("Student")
+def student_profile_page():
+    error = None
+
+    if (
+        request.method == "POST"
+        and request.form.get("action") == "cancel"
+    ):
+        return redirect(url_for("student_dashboard"))
+
+    if "profile_csrf" not in session:
+        session["profile_csrf"] = secrets.token_urlsafe(32)
+
+    with closing(sqlite3.connect(database_path)) as database:
+        database.execute("PRAGMA foreign_keys = ON")
+        database.row_factory = sqlite3.Row
+
+        student = database.execute(
+            "SELECT * FROM student WHERE user_id = ?",
+            (g.user["user_id"],)
+        ).fetchone()
+
+        if student is None:
+            abort(403)
+
+        values = {
+            "name": student["name"],
+            "contact_details": student["contact_details"] or ""
+        }
+
+        if request.method == "POST":
+            token = request.form.get("csrf_token", "")
+
+            if not secrets.compare_digest(
+                token, session["profile_csrf"]
+            ):
+                abort(400, "Form expired. Reload the page and try again.")
+
+            values = {
+                "name": request.form.get("name", "").strip(),
+                "contact_details": request.form.get(
+                    "contact_details", ""
+                ).strip()
+            }
+
+            if request.form.get("action") != "update":
+                error = "Choose Update or Cancel."
+
+            elif not 1 <= len(values["name"]) <= 150:
+                error = "Name must contain 1 to 150 characters."
+
+            else:
+                database.execute(
+                    """
+                    UPDATE student
+                    SET name = ?, contact_details = ?
+                    WHERE student_id = ? AND user_id = ?
+                    """,
+                    (
+                        values["name"],
+                        values["contact_details"],
+                        student["student_id"],
+                        g.user["user_id"]
+                    )
+                )
+                database.commit()
+
+                return redirect(url_for("student_dashboard"))
+
+    return render_template(
+        "student_profile.html",
+        student=student,
+        values=values,
+        csrf_token=session["profile_csrf"],
+        error=error
+    )
+
+@app.route(
+    "/student/slots/<int:slot_id>/booking",
+    methods=["GET", "POST"]
+)
+@require_role("Student")
+def student_update_booking(slot_id):
+    error = None
+
+    if "booking_csrf" not in session:
+        session["booking_csrf"] = secrets.token_urlsafe(32)
+
+    if request.method == "POST":
+        token = request.form.get("csrf_token", "")
+
+        if not secrets.compare_digest(token, session["booking_csrf"]):
+            abort(400, "Form expired. Reload the page and try again.")
+
+    with closing(sqlite3.connect(database_path)) as database:
+        database.execute("PRAGMA foreign_keys = ON")
+        database.row_factory = sqlite3.Row
+
+        if request.method == "POST":
+            database.execute("BEGIN IMMEDIATE")
+
+        student = database.execute(
+            "SELECT student_id FROM student WHERE user_id = ?",
+            (g.user["user_id"],)
+        ).fetchone()
+
+        if student is None:
+            abort(403)
+
+        student_id = student["student_id"]
+
+        slot = database.execute(
+            """
+            SELECT
+                s.*,
+                e.exam_name,
+                e.status AS exam_status,
+                e.slot_booking_start_date,
+                e.slot_booking_end_date,
+                c.course_name,
+                c.status AS course_status,
+                ep.status AS examiner_status,
+                u.role AS examiner_role
+            FROM examination_slot s
+            JOIN examination e ON e.exam_id = s.exam_id
+            JOIN course c ON c.course_id = e.course_id
+            LEFT JOIN examiner_profile ep
+                ON ep.examiner_id = s.examiner_id
+            LEFT JOIN users u ON u.user_id = ep.user_id
+            WHERE s.slot_id = ?
+            """,
+            (slot_id,)
+        ).fetchone()
+
+        if slot is None:
+            abort(404)
+
+        booking = database.execute(
+            """
+            SELECT * FROM booking
+            WHERE student_id = ? AND slot_id = ?
+              AND status IN ('Booked', 'Completed')
+            ORDER BY booking_id DESC
+            LIMIT 1
+            """,
+            (student_id, slot_id)
+        ).fetchone()
+
+        occupied = database.execute(
+            """
+            SELECT COUNT(*) FROM booking
+            WHERE slot_id = ?
+              AND status IN ('Booked', 'Completed')
+            """,
+            (slot_id,)
+        ).fetchone()[0]
+
+        remaining = max(0, slot["max_student_capacity"] - occupied)
+
+        now = datetime.now()
+        today = now.date().isoformat()
+        starts_at = datetime.fromisoformat(
+            slot["slot_date"] + "T" + slot["start_time"]
+        )
+
+        booking_start = slot["slot_booking_start_date"]
+        booking_end = slot["slot_booking_end_date"]
+
+        duplicate = database.execute(
+            """
+            SELECT b.booking_id
+            FROM booking b
+            JOIN examination_slot s ON s.slot_id = b.slot_id
+            WHERE b.student_id = ? AND s.exam_id = ?
+              AND b.status IN ('Booked', 'Completed')
+            LIMIT 1
+            """,
+            (student_id, slot["exam_id"])
+        ).fetchone()
+
+        book_problem = None
+
+        if duplicate is not None:
+            book_problem = "You already have a booking for this examination."
+        elif slot["course_status"] != "Active":
+            book_problem = "This course is inactive."
+        elif slot["exam_status"] != "Booking Open":
+            book_problem = "Booking is not open for this examination."
+        elif not booking_start or not booking_end:
+            book_problem = "The booking period has not been configured."
+        elif not booking_start <= today <= booking_end:
+            book_problem = "This examination is outside its booking period."
+        elif starts_at <= now:
+            book_problem = "This slot has already started."
+        elif (
+            slot["examiner_id"] is None
+            or slot["examiner_status"] != "Approved"
+            or slot["examiner_role"] != "Examiner"
+        ):
+            book_problem = "An approved examiner must be assigned first."
+        elif slot["status"] != "Available" or remaining == 0:
+            book_problem = "This slot is not available for booking."
+
+        cancel_problem = None
+
+        if booking is None or booking["status"] != "Booked":
+            cancel_problem = "You do not have a cancellable booking here."
+        elif not booking_end:
+            cancel_problem = "The cancellation deadline is not configured."
+        elif today > booking_end:
+            cancel_problem = "The cancellation deadline has passed."
+        elif starts_at <= now:
+            cancel_problem = "This slot has already started."
+
+        if request.method == "POST":
+            action = request.form.get("action", "")
+
+            if action == "book":
+                error = book_problem
+            elif action == "cancel_booking":
+                error = cancel_problem
+            else:
+                abort(400)
+
+            if error is None:
+                try:
+                    if action == "book":
+                        database.execute(
+                            """
+                            INSERT INTO booking (
+                                student_id, slot_id, booking_date, status
+                            )
+                            VALUES (?, ?, ?, 'Booked')
+                            """,
+                            (student_id, slot_id, today)
+                        )
+                        new_remaining = remaining - 1
+
+                    else:
+                        database.execute(
+                            """
+                            UPDATE booking
+                            SET status = 'Cancelled'
+                            WHERE booking_id = ? AND student_id = ?
+                            """,
+                            (booking["booking_id"], student_id)
+                        )
+                        new_remaining = (
+                            slot["max_student_capacity"] - occupied + 1
+                        )
+
+                    if slot["status"] in ("Cancelled", "Completed"):
+                        new_status = slot["status"]
+                    else:
+                        new_status = (
+                            "Full" if new_remaining == 0 else "Available"
+                        )
+
+                    database.execute(
+                        """
+                        UPDATE examination_slot
+                        SET available_seats = ?, status = ?
+                        WHERE slot_id = ?
+                        """,
+                        (new_remaining, new_status, slot_id)
+                    )
+                    database.commit()
+
+                except sqlite3.IntegrityError:
+                    database.rollback()
+                    error = "The booking could not be updated."
+
+                else:
+                    return redirect(url_for("student_dashboard"))
+
+            database.rollback()
+
+    return render_template(
+        "student_update_booking.html",
+        slot=slot,
+        booking=booking,
+        remaining=remaining,
+        book_problem=book_problem,
+        cancel_problem=cancel_problem,
+        error=error,
+        csrf_token=session["booking_csrf"]
+    )

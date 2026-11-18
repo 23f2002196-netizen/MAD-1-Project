@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Update booking</title>
+</head>
+<body>
+    <h1>Update booking</h1>
+
+    <p>Examination: {{ slot['exam_name'] }}</p>
+    <p>Course: {{ slot['course_name'] }}</p>
+    <p>Exam ID: {{ slot['exam_id'] }}</p>
+    <p>Slot ID: {{ slot['slot_id'] }}</p>
+    <p>Date: {{ slot['slot_date'] }}</p>
+    <p>Start time: {{ slot['start_time'] }}</p>
+    <p>End time: {{ slot['end_time'] }}</p>
+    <p>Maximum capacity: {{ slot['max_student_capacity'] }}</p>
+    <p>Available seats: {{ remaining }}</p>
+    <p>Slot status: {{ slot['status'] }}</p>
+
+    <p>
+        Your booking:
+        {% if booking %}
+            {{ booking['status'] }}
+        {% else %}
+            Not booked
+        {% endif %}
+    </p>
+
+    {% if error %}
+        <p role="alert">{{ error }}</p>
+    {% endif %}
+
+    <form method="post">
+        <input type="hidden" name="csrf_token"
+               value="{{ csrf_token }}">
+
+        {% if booking %}
+            {% if cancel_problem %}
+                <p>{{ cancel_problem }}</p>
+            {% endif %}
+
+            <button
+                type="submit"
+                name="action"
+                value="cancel_booking"
+                {% if cancel_problem %}disabled{% endif %}
+            >
+                Cancel booking
+            </button>
+        {% else %}
+            {% if book_problem %}
+                <p>{{ book_problem }}</p>
+            {% endif %}
+
+            <button
+                type="submit"
+                name="action"
+                value="book"
+                {% if book_problem %}disabled{% endif %}
+            >
+                Book
+            </button>
+        {% endif %}
+    </form>
+
+    <p>
+        <a href="{{ url_for('student_dashboard') }}">
+            Back without changes
+        </a>
+    </p>
+</body>
+</html>
